@@ -1,0 +1,20 @@
+# Python
+backend/venv/
+backend/.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+backend/build/
+backend/dist/
+
+# Local config / secrets
+backend/.env
+backend/config.yaml
+
+# Node / VS Code extension
+extension/node_modules/
+extension/out/
+*.vsix
+
+# Misc
+.DS_Store

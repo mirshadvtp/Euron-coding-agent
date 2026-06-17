@@ -1,0 +1,151 @@
+{
+  "name": "euron-agent",
+  "displayName": "Euron Coding Agent",
+  "description": "Lightweight agentic coding assistant (Cline/OpenCode-style). Plan, edit, and run code with approvals. Works with Euron/Euri, OpenAI, OpenRouter, Anthropic, Ollama, or any OpenAI-compatible/self-hosted model.",
+  "version": "0.1.0",
+  "publisher": "euron-tech",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "copilot",
+    "cline",
+    "coding assistant",
+    "llm",
+    "ollama",
+    "openai",
+    "anthropic"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/euron-tech/Euron-coding-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/euron-tech/Euron-coding-agent/issues"
+  },
+  "homepage": "https://github.com/euron-tech/Euron-coding-agent#readme",
+  "galleryBanner": {
+    "color": "#1f6feb",
+    "theme": "dark"
+  },
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "euronAgent",
+          "title": "Euron Agent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "euronAgent": [
+        {
+          "type": "webview",
+          "id": "euronAgent.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "euronAgent.openChat",
+        "title": "Open Chat",
+        "category": "Euron Agent"
+      },
+      {
+        "command": "euronAgent.setApiKey",
+        "title": "Set API Key / Provider",
+        "category": "Euron Agent",
+        "icon": "$(key)"
+      },
+      {
+        "command": "euronAgent.selectProvider",
+        "title": "Select Provider",
+        "category": "Euron Agent",
+        "icon": "$(server)"
+      },
+      {
+        "command": "euronAgent.restartBackend",
+        "title": "Restart Backend",
+        "category": "Euron Agent",
+        "icon": "$(debug-restart)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "euronAgent.selectProvider",
+          "when": "view == euronAgent.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "euronAgent.setApiKey",
+          "when": "view == euronAgent.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "euronAgent.restartBackend",
+          "when": "view == euronAgent.chat",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Euron Agent",
+      "properties": {
+        "euronAgent.model": {
+          "type": "string",
+          "default": "",
+          "description": "Override the model id for the active provider. Empty = provider default."
+        },
+        "euronAgent.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python 3.9+ executable used for the managed backend. Empty = auto-detect (python3 / python / py)."
+        },
+        "euronAgent.backendVersion": {
+          "type": "string",
+          "default": "",
+          "description": "Pin the euron-agent backend version installed from PyPI. Empty = latest."
+        },
+        "euronAgent.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Advanced: connect to a backend you run yourself (e.g. ws://127.0.0.1:8000/ws). Empty = the extension auto-installs and manages the backend for you."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node esbuild.js --production",
+    "esbuild": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "compile": "node esbuild.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "ovsx": "^0.9.0",
+    "typescript": "^5.4.0"
+  }
+}

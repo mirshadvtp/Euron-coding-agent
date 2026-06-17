@@ -1,0 +1,14 @@
+# Everything that should NOT ship inside the .vsix.
+# The bundled out/extension.js contains all runtime code, so source &
+# node_modules are excluded.
+.vscode/**
+src/**
+node_modules/**
+out/**/*.map
+esbuild.js
+tsconfig.json
+.gitignore
+**/*.ts
+!out/extension.js
+
+# keep: media/**, package.json, README.md, CHANGELOG.md, LICENSE, media/icon.png

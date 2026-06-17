@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e .
+      - name: Smoke test
+        run: |
+          python -c "import euron_agent.server, euron_agent.cli, euron_agent.loop; print('import ok')"
+          euron-agent providers
+          python -m build || pip install build && python -m build
+
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: Bundle & package
+        run: |
+          npm run esbuild
+          npx vsce package --no-dependencies -o euron-agent.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: euron-agent-vsix
+          path: extension/euron-agent.vsix

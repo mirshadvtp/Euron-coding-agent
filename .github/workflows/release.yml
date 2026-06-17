@@ -1,0 +1,65 @@
+name: Release
+
+# Publishes on a version tag, e.g. `git tag v0.1.0 && git push --tags`.
+# Required repository secrets:
+#   PYPI_API_TOKEN  - PyPI token (scope: project euron-agent)
+#   VSCE_PAT        - Azure DevOps PAT with Marketplace publish rights
+#   OVSX_PAT        - Open VSX access token (for Cursor / VSCodium / Windsurf)
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-backend:
+    name: Publish backend to PyPI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+      - name: Check & upload
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m twine check dist/*
+          python -m twine upload dist/*
+
+  publish-extension:
+    name: Publish VS Code extension
+    runs-on: ubuntu-latest
+    # Publish the extension only after the backend it installs is on PyPI.
+    needs: publish-backend
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        run: npm ci
+      - name: Package
+        run: npx vsce package --no-dependencies -o euron-agent.vsix
+      - name: Publish to VS Code Marketplace
+        run: npx vsce publish --no-dependencies --packagePath euron-agent.vsix -p "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Publish to Open VSX
+        run: npx ovsx publish euron-agent.vsix -p "$OVSX_PAT"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      - name: Attach .vsix to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: extension/euron-agent.vsix

@@ -1,0 +1,88 @@
+# Euron Agent configuration.
+# Copy to `config.yaml` (or point EURON_AGENT_CONFIG at it) and edit.
+#
+# `active` selects which provider profile below is used by default.
+# Every profile under `providers:` is OpenAI-compatible unless `type: anthropic`.
+# That single OpenAI-compatible shape covers Euron/Euri, OpenAI, OpenRouter, Groq,
+# Together, DeepSeek, and ANY self-hosted server that speaks the OpenAI API
+# (Ollama, vLLM, LM Studio, llama.cpp, text-generation-webui, ...).
+
+active: euri
+
+providers:
+  # ---- Euron / Euri ---------------------------------------------------------
+  euri:
+    type: openai           # OpenAI-compatible HTTP API
+    base_url: https://api.euron.one/api/v1   # adjust to your Euri/Euron endpoint
+    api_key_env: EURI_API_KEY                # key is read from this env var
+    model: gpt-4.1-mini                      # whatever model id your endpoint serves
+    temperature: 0.2
+    max_tokens: 4096
+
+  # ---- OpenAI ---------------------------------------------------------------
+  openai:
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    model: gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 4096
+
+  # ---- OpenRouter (hundreds of models behind one OpenAI API) ----------------
+  openrouter:
+    type: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    model: anthropic/claude-3.5-sonnet
+    temperature: 0.2
+    max_tokens: 4096
+
+  # ---- Self-hosted: Ollama (no key needed) ----------------------------------
+  ollama:
+    type: openai
+    base_url: http://localhost:11434/v1
+    api_key_env: null         # local server, no auth
+    model: qwen2.5-coder:7b
+    temperature: 0.2
+    max_tokens: 4096
+
+  # ---- Self-hosted: vLLM / LM Studio / llama.cpp ----------------------------
+  local:
+    type: openai
+    base_url: http://localhost:8001/v1
+    api_key_env: null
+    model: my-local-model
+    temperature: 0.2
+    max_tokens: 4096
+
+  # ---- Anthropic (native API, best tool-calling) ----------------------------
+  anthropic:
+    type: anthropic
+    base_url: null            # use SDK default
+    api_key_env: ANTHROPIC_API_KEY
+    model: claude-sonnet-4-6
+    temperature: 0.2
+    max_tokens: 4096
+
+# Agent behaviour -------------------------------------------------------------
+agent:
+  max_steps: 30              # safety cap on tool-use iterations per task
+  stream: true               # stream tokens as they are generated
+  auto_approve_reads: true   # read_file/list_files/search never need approval
+  auto_approve_writes: false # set true to skip approval for file edits (risky)
+  auto_approve_commands: false
+  max_file_bytes: 120000     # don't feed files larger than this to the model
+  max_command_seconds: 60
+
+# Files the agent must never read or write (globs, matched against rel path).
+ignore:
+  - ".git/**"
+  - "node_modules/**"
+  - "__pycache__/**"
+  - ".venv/**"
+  - "venv/**"
+  - "dist/**"
+  - "build/**"
+  - "*.lock"
+  - ".env"
+  - ".env.*"
