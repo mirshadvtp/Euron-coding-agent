@@ -1,20 +1,24 @@
 """Command-line interface.
 
-    euron-agent run "add a /health route to app.py"   # one-shot in cwd
-    euron-agent chat                                   # interactive REPL
-    euron-agent serve                                  # start the API server
-    euron-agent providers                              # list configured providers
-    euron-agent init                                   # scaffold config.yaml/.env
+Just run `euron-agent` to drop into an interactive chat (Claude-CLI style) where
+you configure everything in-session:
 
-The CLI uses the very same AgentSession/loop as the VS Code backend, so the
-terminal experience and the editor experience are identical.
+    euron-agent                       # interactive chat in the current folder
+    euron-agent run "add a /health route to app.py"
+    euron-agent serve --port 0        # API/WebSocket server (0 = auto-port)
+    euron-agent providers             # list providers
+    euron-agent init                  # scaffold config.yaml + .env (optional)
+
+In chat, configure with slash commands (persisted to ~/.euron-agent/config.json):
+    /provider [name]   /key [value]   /model [name]   /baseurl [url]
+    /config   /providers   /reset   /yes   /help   /exit
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -22,8 +26,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from .config import load_config
+from . import settings as user_settings
+from .config import BUILTIN_PROVIDERS, load_config
 from .events import AgentIO, ApprovalDecision
+from .llm import build_client
 from .loop import AgentSession
 
 
@@ -37,8 +43,6 @@ def _force_utf8() -> None:
 
 
 _force_utf8()
-# legacy_windows=False -> use ANSI (Windows 10+ supports it) instead of the
-# win32 console API, which encodes with the active code page and chokes on '●'.
 console = Console(legacy_windows=False)
 
 
@@ -56,7 +60,6 @@ class TerminalIO(AgentIO):
             sys.stdout.flush()
             self._dirty = False
 
-    # streamed tokens (may arrive from a worker thread)
     def on_token(self, text: str) -> None:
         sys.stdout.write(text)
         sys.stdout.flush()
@@ -65,9 +68,8 @@ class TerminalIO(AgentIO):
     async def emit(self, event: dict) -> None:
         t = event["type"]
         if t == "status":
-            return  # keep the terminal quiet; spinners would fight streaming
+            return
         if t == "assistant_message":
-            # text already streamed via tokens; just close the line
             self._newline_if_dirty()
             return
         self._newline_if_dirty()
@@ -104,13 +106,13 @@ class TerminalIO(AgentIO):
         preview = request.get("preview") or ""
         title = f"Approve {request['name']}?"
         if preview:
-            self._print_diff(preview) if "\n" in preview and (
-                "+++" in preview or "@@" in preview
-            ) else console.print(Panel(preview, title=title, border_style="yellow"))
+            if "\n" in preview and ("+++" in preview or "@@" in preview):
+                self._print_diff(preview)
+            else:
+                console.print(Panel(preview, title=title, border_style="yellow"))
         if self.auto_approve:
             console.print("[green]auto-approved[/green]")
             return ApprovalDecision(approved=True)
-
         answer = await asyncio.to_thread(
             Prompt.ask,
             f"[yellow]{title}[/yellow] (y/n, or type feedback to reject)",
@@ -125,43 +127,203 @@ class TerminalIO(AgentIO):
 
 
 # --------------------------------------------------------------------------- #
+# Config resolution (CLI args + persisted user settings)
+# --------------------------------------------------------------------------- #
+def resolve_config(args):
+    """Merge built-ins ← config.yaml ← ~/.euron-agent ← CLI flags."""
+    s = user_settings.load()
+    base = load_config(args.config)
+    provider = args.provider or s.get("provider") or base.provider.name
+    over = (s.get("providers") or {}).get(provider, {})
+    cfg = load_config(
+        args.config,
+        provider=provider,
+        model=args.model or over.get("model"),
+        api_key=over.get("api_key"),
+        base_url=over.get("base_url"),
+    )
+    if getattr(args, "yes", False):
+        cfg.agent.auto_approve_writes = True
+        cfg.agent.auto_approve_commands = True
+    return cfg
+
+
+def _key_missing(cfg) -> bool:
+    p = cfg.provider
+    if p.api_key:
+        return False
+    if not p.api_key_env:  # e.g. ollama / custom — no key required
+        return False
+    return not os.getenv(p.api_key_env)
+
+
+def _reload(session: AgentSession, args) -> None:
+    cfg = resolve_config(args)
+    session.config = cfg
+    session.ctx.cfg = cfg.agent
+    session.client = build_client(cfg.provider)
+
+
+# --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
 async def _run_task(task: str, args) -> None:
-    cfg = load_config(args.config, provider=args.provider, model=args.model)
-    if args.yes:
-        cfg.agent.auto_approve_writes = True
-        cfg.agent.auto_approve_commands = True
+    cfg = resolve_config(args)
     workspace = str(Path(args.workspace).resolve())
     console.print(
         f"[dim]workspace={workspace} · provider={cfg.provider.name} · "
         f"model={cfg.provider.model}[/dim]"
     )
+    if _key_missing(cfg):
+        console.print(
+            f"[red]No API key for '{cfg.provider.name}'.[/red] Run "
+            f"[bold]euron-agent[/bold] and use /key, or set the env var "
+            f"{cfg.provider.api_key_env}."
+        )
+        return
     io = TerminalIO(auto_approve=args.yes)
-    session = AgentSession(workspace, cfg, io)
-    await session.run(task)
+    await AgentSession(workspace, cfg, io).run(task)
 
 
 def cmd_run(args) -> None:
     asyncio.run(_run_task(args.task, args))
 
 
+HELP = """[bold]commands[/bold]
+  /provider [name]   switch provider (interactive if no name)
+  /key [value]       set API key for the current provider (hidden prompt if blank)
+  /model [name]      set the model for the current provider
+  /baseurl [url]     set a custom base URL (self-hosted / custom endpoints)
+  /config            show current provider, model, base URL, key status
+  /providers         list known providers
+  /reset             clear the conversation context
+  /yes               toggle auto-approve for edits & commands
+  /help              show this help
+  /exit              quit"""
+
+
+def _print_providers() -> None:
+    from rich.table import Table
+
+    s = user_settings.load()
+    cfg = load_config()
+    table = Table(title="Providers")
+    table.add_column("name")
+    table.add_column("type")
+    table.add_column("model")
+    table.add_column("key", justify="center")
+    for name, p in cfg.all_providers.items():
+        over = (s.get("providers") or {}).get(name, {})
+        has_key = bool(
+            over.get("api_key") or (p.api_key_env and os.getenv(p.api_key_env))
+        )
+        needs = bool(p.api_key_env)
+        key_mark = "✓" if has_key else ("—" if not needs else "[red]✗[/red]")
+        table.add_row(name, p.type, over.get("model") or p.model, key_mark)
+    console.print(table)
+
+
+def _pick_provider() -> str:
+    names = list(BUILTIN_PROVIDERS)
+    for i, n in enumerate(names, 1):
+        console.print(f"  [cyan]{i}[/cyan]. {n}")
+    ans = Prompt.ask("provider (number or name)", default="").strip()
+    if ans.isdigit() and 1 <= int(ans) <= len(names):
+        return names[int(ans) - 1]
+    return ans
+
+
+async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO) -> str:
+    parts = line.split(maxsplit=1)
+    cmd = parts[0].lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    if cmd in ("/exit", "/quit"):
+        return "exit"
+    if cmd == "/help":
+        console.print(HELP)
+    elif cmd == "/reset":
+        session.messages.clear()
+        console.print("[dim]context cleared[/dim]")
+    elif cmd == "/yes":
+        io.auto_approve = not io.auto_approve
+        console.print(f"[dim]auto-approve = {io.auto_approve}[/dim]")
+    elif cmd == "/providers":
+        _print_providers()
+    elif cmd == "/config":
+        p = session.config.provider
+        keyset = bool(p.api_key or (p.api_key_env and os.getenv(p.api_key_env)))
+        console.print(
+            f"provider : [cyan]{p.name}[/cyan]\n"
+            f"model    : {p.model}\n"
+            f"base_url : {p.base_url or '(default)'}\n"
+            f"api key  : {'[green]set[/green]' if keyset else '[red]not set[/red]'}"
+        )
+    elif cmd == "/provider":
+        name = rest or await asyncio.to_thread(_pick_provider)
+        if not name:
+            pass
+        elif name not in session.config.all_providers:
+            console.print(f"[red]unknown provider:[/red] {name}  (/providers)")
+        else:
+            user_settings.set_active_provider(name)
+            args.provider = name
+            args.model = None  # let the new provider's own model apply
+            _reload(session, args)
+            console.print(
+                f"[green]provider → {session.config.provider.name}[/green] "
+                f"({session.config.provider.model})"
+            )
+            if _key_missing(session.config):
+                console.print("[yellow]no API key for this provider — use /key[/yellow]")
+    elif cmd == "/key":
+        provider = session.config.provider.name
+        value = rest or await asyncio.to_thread(
+            getpass.getpass, f"API key for {provider} (hidden): "
+        )
+        if value.strip():
+            user_settings.set_provider_field(provider, "api_key", value.strip())
+            _reload(session, args)
+            console.print(f"[green]key saved for {provider}[/green]")
+    elif cmd == "/model":
+        provider = session.config.provider.name
+        value = rest or await asyncio.to_thread(Prompt.ask, "model")
+        if value.strip():
+            user_settings.set_provider_field(provider, "model", value.strip())
+            args.model = value.strip()
+            _reload(session, args)
+            console.print(f"[green]model → {session.config.provider.model}[/green]")
+    elif cmd == "/baseurl":
+        provider = session.config.provider.name
+        value = rest or await asyncio.to_thread(Prompt.ask, "base url")
+        if value.strip():
+            user_settings.set_provider_field(provider, "base_url", value.strip())
+            _reload(session, args)
+            console.print(f"[green]base_url → {session.config.provider.base_url}[/green]")
+    else:
+        console.print(f"[red]unknown command[/red] {cmd}  (/help)")
+    return "handled"
+
+
 async def _chat(args) -> None:
-    cfg = load_config(args.config, provider=args.provider, model=args.model)
-    if args.yes:
-        cfg.agent.auto_approve_writes = True
-        cfg.agent.auto_approve_commands = True
+    cfg = resolve_config(args)
     workspace = str(Path(args.workspace).resolve())
-    io = TerminalIO(auto_approve=args.yes)
-    session = AgentSession(workspace, cfg, io)  # one session => memory across turns
+    io = TerminalIO(auto_approve=getattr(args, "yes", False))
+    session = AgentSession(workspace, cfg, io)
     console.print(
         Panel(
             f"Euron Agent · [bold]{cfg.provider.name}[/bold] / {cfg.provider.model}\n"
             f"workspace: {workspace}\n"
-            "Type a task. Commands: /exit, /reset, /yes (toggle auto-approve).",
+            "Type a task, or /help for commands.",
             border_style="cyan",
         )
     )
+    if _key_missing(cfg):
+        console.print(
+            f"[yellow]No API key for '{cfg.provider.name}'.[/yellow] "
+            "Set one with [bold]/key[/bold] (or switch with [bold]/provider[/bold])."
+        )
+
     while True:
         try:
             msg = await asyncio.to_thread(Prompt.ask, "[bold cyan]you[/bold cyan]")
@@ -170,15 +332,14 @@ async def _chat(args) -> None:
         msg = msg.strip()
         if not msg:
             continue
-        if msg in ("/exit", "/quit"):
-            break
-        if msg == "/reset":
-            session.messages.clear()
-            console.print("[dim]context cleared[/dim]")
+        if msg.startswith("/"):
+            if await _handle_command(msg, session, args, io) == "exit":
+                break
             continue
-        if msg == "/yes":
-            io.auto_approve = not io.auto_approve
-            console.print(f"[dim]auto-approve = {io.auto_approve}[/dim]")
+        if _key_missing(session.config):
+            console.print(
+                "[yellow]No API key set — use /key first (or /provider to switch).[/yellow]"
+            )
             continue
         await session.run(msg)
     console.print("[dim]bye[/dim]")
@@ -196,40 +357,63 @@ def cmd_serve(args) -> None:
 
 
 def cmd_providers(args) -> None:
-    from rich.table import Table
+    _print_providers()
 
-    cfg = load_config(args.config)
-    table = Table(title="Configured providers")
-    table.add_column("name")
-    table.add_column("active")
-    table.add_column("type")
-    table.add_column("model")
-    table.add_column("base_url")
-    for name, p in cfg.all_providers.items():
-        table.add_row(
-            name,
-            "●" if name == cfg.provider.name else "",
-            p.type,
-            p.model,
-            p.base_url or "(default)",
-        )
-    console.print(table)
+
+# Embedded templates so `init` works even from a pip install (the example files
+# are not shipped inside the wheel).
+_CONFIG_TEMPLATE = """# Euron Agent config. `active` picks a provider profile below.
+# Every profile is OpenAI-compatible unless type: anthropic. That covers
+# Euron/Euri, OpenAI, OpenRouter, Ollama, vLLM, LM Studio, and more.
+active: openai
+
+providers:
+  euri:
+    type: openai
+    base_url: https://api.euron.one/api/v1
+    api_key_env: EURI_API_KEY
+    model: gpt-4.1-mini
+  openai:
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    model: gpt-4o-mini
+  ollama:
+    type: openai
+    base_url: http://localhost:11434/v1
+    api_key_env: null
+    model: qwen2.5-coder:7b
+  anthropic:
+    type: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    model: claude-sonnet-4-6
+
+agent:
+  max_steps: 30
+  auto_approve_writes: false
+  auto_approve_commands: false
+"""
+
+_ENV_TEMPLATE = """# Only set the key(s) for the provider(s) you use.
+EURI_API_KEY=
+OPENAI_API_KEY=
+OPENROUTER_API_KEY=
+ANTHROPIC_API_KEY=
+"""
 
 
 def cmd_init(args) -> None:
-    backend = Path(__file__).resolve().parent.parent
-    pairs = [("config.example.yaml", "config.yaml"), (".env.example", ".env")]
-    for src, dst in pairs:
-        dst_path = Path.cwd() / dst
-        src_path = backend / src
-        if dst_path.exists():
-            console.print(f"[yellow]skip[/yellow] {dst} already exists")
-        elif src_path.exists():
-            shutil.copy(src_path, dst_path)
-            console.print(f"[green]created[/green] {dst}")
+    for name, content in (("config.yaml", _CONFIG_TEMPLATE), (".env", _ENV_TEMPLATE)):
+        dst = Path.cwd() / name
+        if dst.exists():
+            console.print(f"[yellow]skip[/yellow] {name} already exists")
         else:
-            console.print(f"[red]missing template[/red] {src}")
-    console.print("Edit config.yaml (pick a provider) and .env (add your key).")
+            dst.write_text(content, encoding="utf-8")
+            console.print(f"[green]created[/green] {name}")
+    console.print(
+        "Tip: you can also just run [bold]euron-agent[/bold] and use /provider and "
+        "/key — no files needed."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -240,10 +424,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", help="Path to config.yaml")
     p.add_argument("--provider", help="Override active provider profile")
     p.add_argument("--model", help="Override model id")
-    p.add_argument(
-        "--workspace", default=os.getcwd(), help="Workspace root (default: cwd)"
-    )
-    sub = p.add_subparsers(dest="command", required=True)
+    p.add_argument("--workspace", default=os.getcwd(), help="Workspace root (default: cwd)")
+    sub = p.add_subparsers(dest="command")
+    sub.required = False  # bare `euron-agent` -> chat
 
     r = sub.add_parser("run", help="Run a single task and exit")
     r.add_argument("task")
@@ -260,17 +443,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--reload", action="store_true")
     s.set_defaults(func=cmd_serve)
 
-    sub.add_parser("providers", help="List configured providers").set_defaults(
-        func=cmd_providers
-    )
-    sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(
-        func=cmd_init
-    )
+    sub.add_parser("providers", help="List configured providers").set_defaults(func=cmd_providers)
+    sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(func=cmd_init)
     return p
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    if not getattr(args, "command", None):
+        args.func = cmd_chat
+        args.yes = False
     try:
         args.func(args)
     except KeyboardInterrupt:
