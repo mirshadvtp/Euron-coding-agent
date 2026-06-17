@@ -143,7 +143,7 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@types/ws": "^8.5.10",
-    "@vscode/vsce": "^2.24.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.20.0",
     "ovsx": "^0.9.0",
     "typescript": "^5.4.0"
