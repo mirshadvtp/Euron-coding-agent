@@ -12,7 +12,7 @@ anywhere, with any model, fully self-hostable.
 [![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen.svg)](backend/tests)
 
 <!-- AUTOGEN:STATUS -->
-**Latest: v1.0.5** · 28 tools · 15 providers · 62 tests passing
+**Latest: v1.0.6** · 28 tools · 15 providers · 62 tests passing
 <!-- /AUTOGEN:STATUS -->
 
 </div>

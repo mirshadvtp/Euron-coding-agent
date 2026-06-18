@@ -508,13 +508,24 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
         p = write_template(session.workspace)
         console.print(f"[green]wrote {p.name}[/green] — edit it with project instructions.")
     elif cmd == "/usage":
+        from . import pricing
+
+        p = session.config.provider
+        priced = pricing.is_priced(p.model, session.config.pricing)
+        cost_str = f"${session.session_cost:.4f}" if priced else "[yellow]pricing not set[/yellow]"
         console.print(
             f"[bold]Usage this session[/bold]\n"
-            f"  tokens: {session.session_tokens}  ·  cost: ${session.session_cost:.4f}\n"
+            f"  model: [cyan]{p.name}/{p.model}[/cyan]\n"
+            f"  tokens: {session.session_tokens}  ·  cost: {cost_str}\n"
             f"  sub-agents: {session.subagent_calls}"
         )
+        if not priced and session.session_tokens:
+            console.print(
+                f"[dim]  No built-in price for '{p.model}'. Add it to config.yaml:\n"
+                f"    pricing:\n      \"{p.model}\": {{ input: 1.25, output: 10 }}   # USD per 1M tokens[/dim]"
+            )
         if session.tool_calls:
-            console.print("  tools: " + ", ".join(f"{k}×{v}" for k, v in session.tool_calls.most_common()))
+            console.print("  tools: " + ", ".join(f"{k} x{v}" for k, v in session.tool_calls.most_common()))
     elif cmd == "/skills":
         if session.skills:
             for name, s in session.skills.items():

@@ -547,10 +547,18 @@ def test_custom_commands(tmp_path):
 
 
 def test_pricing():
-    from euron_agent.pricing import cost_for
+    from euron_agent.pricing import cost_for, is_priced, rate_for
     assert abs(cost_for("gpt-4o-mini", 1_000_000, 0) - 0.15) < 1e-9
-    assert cost_for("unknown-model", 1000, 1000) == 0.0
-    assert cost_for("qwen2.5-coder:7b", 1000, 1000) == 0.0
+    assert cost_for("unknown-model-xyz", 1000, 1000) == 0.0
+    assert not is_priced("unknown-model-xyz")
+    # current models are now priced (the gpt-5.5 / $0 bug)
+    assert is_priced("gpt-5.5")
+    assert is_priced("gemini-2.0-flash") and is_priced("claude-sonnet-4-6")
+    # config override prices any model
+    over = {"my-model": {"input": 2.0, "output": 8.0}}
+    assert is_priced("my-model", over)
+    assert abs(cost_for("my-model", 1_000_000, 1_000_000, over) - 10.0) < 1e-9
+    assert rate_for("my-model", over) == (2.0, 8.0)
 
 
 def test_multimodal(tmp_path):

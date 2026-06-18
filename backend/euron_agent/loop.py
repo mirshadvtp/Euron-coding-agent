@@ -238,7 +238,8 @@ class AgentSession:
 
             self.session_tokens += resp.prompt_tokens + resp.completion_tokens
             self.session_cost += pricing.cost_for(
-                self.config.provider.model, resp.prompt_tokens, resp.completion_tokens
+                self.config.provider.model, resp.prompt_tokens, resp.completion_tokens,
+                self.config.pricing,
             )
             await self.io.emit(
                 ev.usage(

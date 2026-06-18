@@ -126,6 +126,12 @@ mcp:
     # remote:
     #   url: https://example.com/mcp   # SSE/HTTP endpoint
 
+# Cost estimation. Most common models are priced out of the box; add or override
+# any model here (USD per 1M tokens). Substring match against the model id.
+pricing: {}
+  # "gpt-5.5": { input: 1.25, output: 10 }
+  # "my-local-model": { input: 0, output: 0 }
+
 # Push agent results to chat platforms (used on task completion + by schedules).
 notifications:
   on: [done]                  # which events: done | error

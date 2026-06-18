@@ -71,6 +71,7 @@ class Config:
     permissions: dict = field(default_factory=dict)
     hooks: dict = field(default_factory=dict)
     notifications: dict = field(default_factory=dict)
+    pricing: dict = field(default_factory=dict)  # model -> {input, output} per 1M tokens
 
 
 DEFAULT_IGNORE = [
@@ -306,4 +307,5 @@ def load_config(
         permissions=raw.get("permissions", {}) or {},
         hooks=raw.get("hooks", {}) or {},
         notifications=raw.get("notifications", {}) or {},
+        pricing=raw.get("pricing", {}) or {},
     )
