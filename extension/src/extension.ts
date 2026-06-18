@@ -117,6 +117,14 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showTextDocument(uri);
       }
     }),
+    vscode.commands.registerCommand('euronAgent.review', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.euronAgent');
+      provider.runText(
+        'Review the current uncommitted git changes (call git_diff first) for bugs, ' +
+        'security issues, race conditions, and improvements. Give a concise, prioritized ' +
+        'findings list. Do NOT modify files unless asked.'
+      );
+    }),
     vscode.commands.registerCommand('euronAgent.fixDiagnostics', async () => {
       const items: string[] = [];
       for (const [uri, diags] of vscode.languages.getDiagnostics()) {
@@ -246,7 +254,8 @@ async function buildInitPayload(
     model: settingModel || (meta.custom ? customModel : undefined) || undefined,
     auto_approve: context.globalState.get<boolean>(KEY_AUTOAPPROVE) || false,
     persist: cfg.get<boolean>('persistHistory') ?? true,
-    plan_mode: context.globalState.get<boolean>(KEY_PLAN) || false
+    plan_mode: context.globalState.get<boolean>(KEY_PLAN) || false,
+    reasoning_effort: cfg.get<string>('effort') || undefined
   };
 }
 

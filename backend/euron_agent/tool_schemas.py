@@ -14,6 +14,8 @@ MUTATING_TOOLS = {
     "run_command",
     "bash_background",
     "git_commit",
+    "worktree_add",
+    "worktree_remove",
 }
 
 
@@ -229,10 +231,34 @@ TOOL_SCHEMAS = [
         },
         ["description", "prompt"],
     ),
+    _fn(
+        "use_skill",
+        "Load the full instructions for one of the available SKILLS by name (see the "
+        "skills list in your system prompt). Call this before doing the skill's task.",
+        {"name": {"type": "string", "description": "The skill name to load."}},
+        ["name"],
+    ),
+    _fn(
+        "worktree_add",
+        "Create an isolated git worktree (a separate working copy) to make changes "
+        "safely without touching the main tree. Requires approval.",
+        {
+            "name": {"type": "string", "description": "Worktree name."},
+            "branch": {"type": "string", "description": "Optional new branch name."},
+        },
+        ["name"],
+    ),
+    _fn("worktree_list", "List git worktrees.", {}, []),
+    _fn(
+        "worktree_remove",
+        "Remove a git worktree created with worktree_add. Requires approval.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
 ]
 
 # Tools handled directly by the loop (not in tools.TOOL_FUNCS).
-LOOP_TOOLS = {"todo_write", "spawn_agent", "update_plan"}
+LOOP_TOOLS = {"todo_write", "spawn_agent", "update_plan", "use_skill"}
 
 # In plan mode only these (read-only + planning) are offered.
 PLAN_MODE_TOOLS = {
@@ -247,6 +273,7 @@ PLAN_MODE_TOOLS = {
     "git_diff",
     "update_plan",
     "todo_write",
+    "use_skill",
 }
 
 

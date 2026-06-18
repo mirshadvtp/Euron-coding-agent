@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0
+
+Claude + Cursor power-ups.
+
+- **Skills** — packaged capabilities in `.euron/skills/<name>/SKILL.md`, loaded on
+  demand via `use_skill` (Claude-Code-style progressive disclosure).
+- **Model fallback chains** — `fallback_models` tries other models if the primary
+  keeps failing.
+- **Git worktree isolation** — `worktree_add/list/remove` (Cursor "shadow workspace").
+- **`/review`** — review the current git changes for bugs (Claude `/code-review` /
+  Cursor BugBot, local); **Review Changes** command in the extension.
+- **`/usage`** — tokens, cost, and per-tool/sub-agent breakdown.
+- **`/effort low|medium|high`** — reasoning effort preset (+ `euronAgent.effort`).
+- **`/skills`** — list available skills.
+
 ## 0.4.0
 
 Phases 3–4 — config, control, and a richer UI (model-agnostic).

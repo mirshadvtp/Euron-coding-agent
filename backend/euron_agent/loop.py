@@ -14,8 +14,10 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from collections import Counter
+
 from . import events as ev
-from . import gitignore, history, memory, pricing
+from . import gitignore, history, memory, pricing, skills as skills_mod
 from .checkpoints import Checkpointer
 from .config import Config
 from .context import compact_history, expand_mentions
@@ -79,6 +81,9 @@ class AgentSession:
         self.checkpointer = Checkpointer()
         self.session_tokens = 0
         self.session_cost = 0.0
+        self.tool_calls: Counter = Counter()
+        self.subagent_calls = 0
+        self.skills = skills_mod.load_skills(workspace)
         self.persist = persist
         self.plan_mode = plan_mode
         self.depth = depth
@@ -104,7 +109,12 @@ class AgentSession:
         tree = list_files(self.ctx).output
         base = system_prompt(self.workspace, tree)
         mem = memory.load_memory(self.workspace)
-        return base + ("\n\n# Memory / project instructions\n" + mem if mem else "")
+        if mem:
+            base += "\n\n# Memory / project instructions\n" + mem
+        skill_text = skills_mod.skills_summary(self.skills)
+        if skill_text:
+            base += "\n\n# Skills\n" + skill_text
+        return base
 
     def _ensure_system(self) -> None:
         if not self.messages:
@@ -222,6 +232,7 @@ class AgentSession:
 
     # ------------------------------------------------------------------ #
     async def _handle_tool_call(self, tc) -> None:
+        self.tool_calls[tc.name] += 1
         if self._cancelled:
             msg = "Cancelled by user before execution."
             await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
@@ -334,12 +345,25 @@ class AgentSession:
             await self._spawn_agent(tc)
             return
 
+        if tc.name == "use_skill":
+            name = tc.arguments.get("name", "")
+            skill = self.skills.get(name)
+            await self.io.emit(ev.tool_start(tc.id, "use_skill", {"name": name}))
+            if skill:
+                out = f"Skill '{name}':\n{skill['body']}"
+            else:
+                out = f"No such skill: {name}. Available: {', '.join(self.skills) or '(none)'}"
+            await self.io.emit(ev.tool_result(tc.id, "use_skill", bool(skill), out[:300]))
+            self._append_tool_result(tc.id, out)
+            return
+
         self._append_tool_result(tc.id, f"Unknown meta-tool: {tc.name}")
 
     async def _spawn_agent(self, tc) -> None:
         if self.depth >= _MAX_SUBAGENT_DEPTH:
             self._append_tool_result(tc.id, "Sub-agents cannot spawn more sub-agents.")
             return
+        self.subagent_calls += 1
         desc = tc.arguments.get("description", "sub-task")
         prompt = tc.arguments.get("prompt", "")
         await self.io.emit(ev.subagent_start(tc.id, desc))

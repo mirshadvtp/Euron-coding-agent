@@ -55,6 +55,8 @@ class AgentConfig:
     # extended thinking / reasoning (best-effort, provider-dependent)
     thinking: bool = False
     reasoning_effort: Optional[str] = None  # "low" | "medium" | "high"
+    # try these models (same provider) in order if the primary call keeps failing
+    fallback_models: list = field(default_factory=list)
 
 
 @dataclass
@@ -214,6 +216,7 @@ def load_config(
         use_gitignore=bool(agent_raw.get("use_gitignore", True)),
         thinking=bool(agent_raw.get("thinking", False)),
         reasoning_effort=agent_raw.get("reasoning_effort"),
+        fallback_models=list(agent_raw.get("fallback_models", []) or []),
     )
 
     ignore = raw.get("ignore") or DEFAULT_IGNORE

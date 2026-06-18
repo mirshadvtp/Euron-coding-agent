@@ -443,6 +443,26 @@ def git_commit(ctx: ToolContext, message: str, all: bool = True) -> ToolOutcome:
 
 
 # --------------------------------------------------------------------------- #
+# Git worktrees — isolated copies to work safely in parallel
+# --------------------------------------------------------------------------- #
+def worktree_add(ctx: ToolContext, name: str, branch: str = "") -> ToolOutcome:
+    rel = f".euron/worktrees/{name}"
+    flag = f"-b {branch} " if branch else ""
+    out = run_command(ctx, f"git worktree add {flag}{rel}")
+    if out.ok:
+        out.output += f"\n(isolated worktree at {rel}; run commands there with: cd {rel} && …)"
+    return out
+
+
+def worktree_list(ctx: ToolContext) -> ToolOutcome:
+    return run_command(ctx, "git worktree list")
+
+
+def worktree_remove(ctx: ToolContext, name: str) -> ToolOutcome:
+    return run_command(ctx, f"git worktree remove .euron/worktrees/{name} --force")
+
+
+# --------------------------------------------------------------------------- #
 # Dispatch table
 # --------------------------------------------------------------------------- #
 TOOL_FUNCS = {
@@ -465,6 +485,9 @@ TOOL_FUNCS = {
     "git_status": git_status,
     "git_diff": git_diff,
     "git_commit": git_commit,
+    "worktree_add": worktree_add,
+    "worktree_list": worktree_list,
+    "worktree_remove": worktree_remove,
 }
 
 

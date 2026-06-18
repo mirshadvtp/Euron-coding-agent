@@ -31,7 +31,7 @@ from .config import Config, load_config
 from .events import AgentIO, ApprovalDecision
 from .loop import AgentSession
 
-app = FastAPI(title="Euron Agent", version="0.4.0")
+app = FastAPI(title="Euron Agent", version="0.5.0")
 app.state.token = None  # set by serve(); None disables auth (local dev/tests)
 
 
@@ -110,6 +110,10 @@ async def ws_endpoint(ws: WebSocket):
                 if data.get("auto_approve"):
                     cfg.agent.auto_approve_writes = True
                     cfg.agent.auto_approve_commands = True
+                effort = data.get("reasoning_effort")
+                if effort:
+                    cfg.agent.reasoning_effort = effort
+                    cfg.agent.thinking = effort == "high"
                 session = AgentSession(
                     data["workspace_path"],
                     cfg,

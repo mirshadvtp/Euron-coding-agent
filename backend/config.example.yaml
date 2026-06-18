@@ -75,6 +75,8 @@ agent:
   max_command_seconds: 60
   thinking: false            # enable provider-native extended thinking (Anthropic)
   reasoning_effort: null     # low|medium|high — for OpenAI o-series/reasoning models
+  fallback_models: []        # try these (same provider) in order if the primary fails
+                             #   e.g. ["gpt-4o", "gpt-4o-mini"]
 
 # Fine-grained permissions (override the auto_approve_* flags). First match wins.
 # Each entry is "tool" or "tool(glob)" matched against the action target

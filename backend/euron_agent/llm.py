@@ -48,7 +48,7 @@ import re
 _REASONING_MODEL = re.compile(r"(^|[-/_])(o1|o3|o4|gpt-5|reason)", re.IGNORECASE)
 
 
-def build_client(provider: ProviderConfig, agent: Optional[AgentConfig] = None):
+def _make_client(provider: ProviderConfig, agent: Optional[AgentConfig] = None):
     attempts = agent.retry_attempts if agent else 3
     backoff = agent.retry_backoff if agent else 1.5
     thinking = agent.thinking if agent else False
@@ -56,6 +56,35 @@ def build_client(provider: ProviderConfig, agent: Optional[AgentConfig] = None):
     if provider.type == "anthropic":
         return AnthropicClient(provider, attempts, backoff, thinking=thinking)
     return OpenAICompatClient(provider, attempts, backoff, reasoning_effort=effort)
+
+
+def build_client(provider: ProviderConfig, agent: Optional[AgentConfig] = None):
+    primary = _make_client(provider, agent)
+    fallbacks = (agent.fallback_models if agent else []) or []
+    if not fallbacks:
+        return primary
+    from dataclasses import replace
+
+    clients = [primary] + [_make_client(replace(provider, model=m), agent) for m in fallbacks]
+    return FallbackClient(clients)
+
+
+class FallbackClient:
+    """Tries each underlying client in order; falls through on LLMError."""
+
+    def __init__(self, clients: list):
+        self.clients = clients
+        self.provider = clients[0].provider
+
+    def chat(self, messages, tools=None, stream_cb=None, stream=True) -> "LLMResponse":
+        last: Optional[Exception] = None
+        for client in self.clients:
+            try:
+                return client.chat(messages, tools, stream_cb, stream)
+            except LLMError as e:
+                last = e
+                continue
+        raise last if last else LLMError("no clients available")
 
 
 def _safe_json_loads(s: str) -> dict:

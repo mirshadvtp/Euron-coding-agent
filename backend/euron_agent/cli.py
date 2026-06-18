@@ -224,8 +224,12 @@ HELP = """[bold]commands[/bold]
   /config            show current provider, model, base URL, key status
   /providers         list known providers
   /plan              plan mode for the next task (research → approve → execute)
+  /review            review the current git changes for bugs (like a code review)
   /compact           summarize the conversation to free up context
   /init              create an AGENTS.md project-memory file
+  /skills            list available skills (.euron/skills/<name>/SKILL.md)
+  /usage             show tokens, cost, and tool usage this session
+  /effort <level>    reasoning effort: low | medium | high
   /undo              revert the file changes from the last task
   /reset             clear the conversation context
   /yes               toggle auto-approve for edits & commands
@@ -356,6 +360,35 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
 
         p = write_template(session.workspace)
         console.print(f"[green]wrote {p.name}[/green] — edit it with project instructions.")
+    elif cmd == "/usage":
+        console.print(
+            f"[bold]Usage this session[/bold]\n"
+            f"  tokens: {session.session_tokens}  ·  cost: ${session.session_cost:.4f}\n"
+            f"  sub-agents: {session.subagent_calls}"
+        )
+        if session.tool_calls:
+            console.print("  tools: " + ", ".join(f"{k}×{v}" for k, v in session.tool_calls.most_common()))
+    elif cmd == "/skills":
+        if session.skills:
+            for name, s in session.skills.items():
+                console.print(f"  [cyan]{name}[/cyan] — {s['description']}")
+        else:
+            console.print("[dim]no skills found (add .euron/skills/<name>/SKILL.md)[/dim]")
+    elif cmd == "/effort":
+        level = (rest or "medium").strip().lower()
+        if level not in ("low", "medium", "high"):
+            console.print("[red]usage: /effort low|medium|high[/red]")
+        else:
+            session.config.agent.reasoning_effort = level
+            session.config.agent.thinking = level == "high"
+            from .llm import build_client
+
+            session.client = build_client(session.config.provider, session.config.agent)
+            console.print(f"[green]effort → {level}[/green]")
+    elif cmd == "/review":
+        return ("run:Review the current uncommitted git changes (call git_diff first) "
+                "for bugs, security issues, race conditions, and improvements. Give a "
+                "concise, prioritized findings list. Do NOT modify files unless asked.")
     else:
         return "unknown"
     return "handled"
@@ -392,7 +425,9 @@ async def _chat(args) -> None:
             result = await _handle_command(msg, session, args, io)
             if result == "exit":
                 break
-            if result == "unknown":
+            if result and result.startswith("run:"):
+                msg = result[4:]  # a command that expands into a task
+            elif result == "unknown":
                 # maybe a custom command from .euron/commands/<name>.md
                 from .commands import expand_command, load_commands
 
@@ -400,7 +435,6 @@ async def _chat(args) -> None:
                 custom = load_commands(workspace)
                 if name in custom:
                     msg = expand_command(custom[name], rest.strip())
-                    # fall through and run as a task
                 else:
                     console.print(f"[red]unknown command[/red] /{name}  (/help)")
                     continue

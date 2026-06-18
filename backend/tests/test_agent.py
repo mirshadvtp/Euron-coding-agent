@@ -559,3 +559,71 @@ def test_anthropic_image_conversion():
     _system, conv = AnthropicClient._to_anthropic_messages(msgs)
     blocks = conv[0]["content"]
     assert any(b["type"] == "image" for b in blocks)
+
+
+# --------------------------------------------------------------------------- #
+# 0.5.0: skills / fallback / worktrees / usage
+# --------------------------------------------------------------------------- #
+def test_skills(tmp_path):
+    from euron_agent.skills import load_skills, skills_summary
+    d = tmp_path / ".euron" / "skills" / "deploy"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\ndescription: Deploy the app\n---\nRun make deploy.",
+                                encoding="utf-8")
+    skills = load_skills(str(tmp_path))
+    assert skills["deploy"]["description"] == "Deploy the app"
+    assert "deploy" in skills_summary(skills)
+
+
+def test_loop_use_skill(tmp_path):
+    d = tmp_path / ".euron" / "skills" / "hello"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\ndescription: say hi\n---\nSECRET_PLAYBOOK", encoding="utf-8")
+    sess, io = make_session(tmp_path, [
+        LLMResponse(content="", tool_calls=[ToolCall("1", "use_skill", {"name": "hello"})]),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+    run(sess.run("use the hello skill"))
+    assert any("SECRET_PLAYBOOK" in (m.get("content") or "")
+               for m in sess.messages if m.get("role") == "tool")
+
+
+def test_fallback_client():
+    from euron_agent.llm import FallbackClient, LLMError, LLMResponse
+
+    class Boom:
+        provider = None
+
+        def chat(self, *a, **k):
+            raise LLMError("primary down")
+
+    class Good:
+        provider = None
+
+        def chat(self, *a, **k):
+            return LLMResponse(content="fallback worked")
+
+    fc = FallbackClient([Boom(), Good()])
+    assert fc.chat([], None, None, False).content == "fallback worked"
+
+
+def test_worktree(tmp_path):
+    import subprocess
+    for c in ("git init -q", "git config user.email t@t.com", "git config user.name t"):
+        subprocess.run(c, cwd=tmp_path, shell=True)
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    subprocess.run("git add -A && git commit -q -m init", cwd=tmp_path, shell=True)
+    from euron_agent.tools import worktree_add, worktree_list, worktree_remove
+    ctx = ctx_for(tmp_path)
+    assert worktree_add(ctx, "feature", "feat-branch").ok
+    assert "feature" in worktree_list(ctx).output
+    assert worktree_remove(ctx, "feature").ok
+
+
+def test_usage_tracking(tmp_path):
+    sess, io = make_session(tmp_path, [
+        LLMResponse(content="", tool_calls=[ToolCall("1", "list_files", {})]),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+    run(sess.run("list the files"))
+    assert sess.tool_calls["list_files"] == 1

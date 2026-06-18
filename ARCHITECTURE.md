@@ -66,6 +66,7 @@ backend/
     hooks.py           # shell-command hooks on lifecycle events
     memory.py          # AGENTS.md/EURON.md project memory
     commands.py        # custom slash commands (.euron/commands/*.md)
+    skills.py          # packaged skills (.euron/skills/<name>/SKILL.md)
     pricing.py         # token → cost estimation
     server.py          # FastAPI: /ws (streaming+approval) + REST + dynamic port + auth
     cli.py             # run / chat / serve / providers / init  (+ TerminalIO)
@@ -323,18 +324,29 @@ explicit CLI/extension overrides. Any OpenAI-compatible endpoint works by settin
 - ✅ **Multimodal image input** to vision models; markdown rendering + "Fix
   Diagnostics" in the extension.
 
-### Still on the roadmap
-- ◻ `@file` **autocomplete** in the webview; syntax-highlighted diffs.
-- ◻ Deeper **diagnostics loop** (auto-feed errors after each edit, not on demand).
-- ◻ Semantic summarization / optional RAG for very large repos.
-- ◻ Undo via VS Code's native `WorkspaceEdit` (currently the built-in checkpointer).
+**0.5.0 — Claude + Cursor power-ups:**
+- ✅ **Skills** (`.euron/skills/<name>/SKILL.md`, progressive disclosure via
+  `use_skill`).
+- ✅ **Model fallback chains** (`fallback_models`).
+- ✅ **Git worktree isolation** (`worktree_add/list/remove` — Cursor shadow workspace).
+- ✅ **`/review`** (code review of the diff) + extension "Review Changes".
+- ✅ **`/usage`** breakdown (tokens, cost, per-tool, sub-agents) and **`/effort`**.
 
-### Intentionally out of scope (to stay light & model-agnostic)
+### Still on the roadmap (buildable, local)
+- ◻ **Plugin system** (install bundles of skills/commands/MCP from a folder/URL).
+- ◻ **Named session resume + dashboard** (`/resume`, list, transcript search).
+- ◻ Editor-native **diff apply** (`WorkspaceEdit`) + `@file` autocomplete.
+- ◻ Deeper **diagnostics loop** (auto after each edit) and CI/PR-fix helpers.
+
+### Intentionally out of scope (different product surface)
+- ❌ Cursor **Tab** (proprietary inline-completion model) — we're an agent, not an
+  editor completion engine.
+- ❌ Hosted **cloud / background agents**, **BugBot** SaaS, mobile apps, routines,
+  computer-use GUI control — need a hosted service / proprietary infra.
+- ❌ Vector-DB / embeddings indexing — retrieval stays ripgrep + agentic search
+  (the same choice Claude Code makes); keeps it light and model-agnostic.
 - ❌ Anthropic-locked features as hard deps (prompt caching, server-side web
-  search, computer-use, citations) — we ship provider-neutral equivalents.
-- ❌ Vector-DB / embeddings RAG as a core dependency (retrieval = ripgrep +
-  agentic search, like Claude Code).
-- ❌ Hosted cloud service / accounts / billing; telemetry; non-VS-Code IDEs.
+  search, citations) — provider-neutral equivalents instead.
 
 ---
 
