@@ -692,8 +692,20 @@ def cmd_init(args) -> None:
 # --------------------------------------------------------------------------- #
 # Parser
 # --------------------------------------------------------------------------- #
+def cmd_version(args) -> None:
+    from . import __version__
+
+    console.print(f"euron-agent {__version__}  (euron-coding-agent)")
+
+
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
+
     p = argparse.ArgumentParser(prog="euron-agent", description="Euron coding agent.")
+    p.add_argument(
+        "--version", "-V", action="version",
+        version=f"euron-agent {__version__} (euron-coding-agent)",
+    )
     p.add_argument("--config", help="Path to config.yaml")
     p.add_argument("--provider", help="Override active provider profile")
     p.add_argument("--model", help="Override model id")
@@ -725,6 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("providers", help="List configured providers").set_defaults(func=cmd_providers)
     sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(func=cmd_init)
     sub.add_parser("update", help="Update euron-coding-agent to the latest version").set_defaults(func=cmd_update)
+    sub.add_parser("version", help="Show the installed version").set_defaults(func=cmd_version)
 
     pl = sub.add_parser("plugin", help="Manage plugins (skills/commands/MCP bundles)")
     pl.add_argument("action", choices=["add", "list", "remove"])
