@@ -43,12 +43,19 @@ class LLMError(RuntimeError):
     pass
 
 
+import re
+
+_REASONING_MODEL = re.compile(r"(^|[-/_])(o1|o3|o4|gpt-5|reason)", re.IGNORECASE)
+
+
 def build_client(provider: ProviderConfig, agent: Optional[AgentConfig] = None):
     attempts = agent.retry_attempts if agent else 3
     backoff = agent.retry_backoff if agent else 1.5
+    thinking = agent.thinking if agent else False
+    effort = agent.reasoning_effort if agent else None
     if provider.type == "anthropic":
-        return AnthropicClient(provider, attempts, backoff)
-    return OpenAICompatClient(provider, attempts, backoff)
+        return AnthropicClient(provider, attempts, backoff, thinking=thinking)
+    return OpenAICompatClient(provider, attempts, backoff, reasoning_effort=effort)
 
 
 def _safe_json_loads(s: str) -> dict:
@@ -110,12 +117,19 @@ class _RetryMixin:
 # OpenAI-compatible
 # --------------------------------------------------------------------------- #
 class OpenAICompatClient(_RetryMixin):
-    def __init__(self, provider: ProviderConfig, attempts: int = 3, backoff: float = 1.5):
+    def __init__(
+        self,
+        provider: ProviderConfig,
+        attempts: int = 3,
+        backoff: float = 1.5,
+        reasoning_effort: Optional[str] = None,
+    ):
         from openai import OpenAI
 
         self.provider = provider
         self.retry_attempts = attempts
         self.retry_backoff = backoff
+        self.reasoning_effort = reasoning_effort
         self.client = OpenAI(
             api_key=provider.api_key or "sk-no-key-required",
             base_url=provider.base_url,
@@ -129,6 +143,10 @@ class OpenAICompatClient(_RetryMixin):
             "temperature": self.provider.temperature,
             "max_tokens": self.provider.max_tokens,
         }
+        # Reasoning models take reasoning_effort and reject custom temperature.
+        if self.reasoning_effort and _REASONING_MODEL.search(self.provider.model):
+            kwargs["reasoning_effort"] = self.reasoning_effort
+            kwargs.pop("temperature", None)
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
@@ -192,12 +210,19 @@ class OpenAICompatClient(_RetryMixin):
 # Anthropic native
 # --------------------------------------------------------------------------- #
 class AnthropicClient(_RetryMixin):
-    def __init__(self, provider: ProviderConfig, attempts: int = 3, backoff: float = 1.5):
+    def __init__(
+        self,
+        provider: ProviderConfig,
+        attempts: int = 3,
+        backoff: float = 1.5,
+        thinking: bool = False,
+    ):
         import anthropic
 
         self.provider = provider
         self.retry_attempts = attempts
         self.retry_backoff = backoff
+        self.thinking = thinking
         self.client = anthropic.Anthropic(
             api_key=provider.api_key, base_url=provider.base_url or None
         )
@@ -229,7 +254,22 @@ class AnthropicClient(_RetryMixin):
             if role == "system":
                 system_parts.append(m.get("content") or "")
             elif role == "user":
-                push("user", {"type": "text", "text": m.get("content") or ""})
+                content = m.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if block.get("type") == "text":
+                            push("user", {"type": "text", "text": block.get("text", "")})
+                        elif block.get("type") == "image_url":
+                            url = block.get("image_url", {}).get("url", "")
+                            if url.startswith("data:") and "," in url:
+                                header, data = url.split(",", 1)
+                                media = header.split(";")[0].split(":")[-1]
+                                push("user", {
+                                    "type": "image",
+                                    "source": {"type": "base64", "media_type": media, "data": data},
+                                })
+                else:
+                    push("user", {"type": "text", "text": content or ""})
             elif role == "assistant":
                 if m.get("content"):
                     push("assistant", {"type": "text", "text": m["content"]})
@@ -258,6 +298,11 @@ class AnthropicClient(_RetryMixin):
             "max_tokens": self.provider.max_tokens,
             "temperature": self.provider.temperature,
         }
+        if self.thinking:
+            budget = min(8000, max(1024, self.provider.max_tokens // 2))
+            kwargs["max_tokens"] = max(self.provider.max_tokens, budget + 1024)
+            kwargs["temperature"] = 1  # required when thinking is enabled
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         if tools:
             kwargs["tools"] = self._to_anthropic_tools(tools)
 

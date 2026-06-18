@@ -73,6 +73,35 @@ agent:
   auto_approve_commands: false
   max_file_bytes: 120000     # don't feed files larger than this to the model
   max_command_seconds: 60
+  thinking: false            # enable provider-native extended thinking (Anthropic)
+  reasoning_effort: null     # low|medium|high — for OpenAI o-series/reasoning models
+
+# Fine-grained permissions (override the auto_approve_* flags). First match wins.
+# Each entry is "tool" or "tool(glob)" matched against the action target
+# (path for file tools, command for run_command, etc.).
+permissions:
+  deny:
+    - run_command(rm -rf*)
+    - delete_file(**/.git/**)
+  ask:
+    - run_command(*)
+    - git_commit(*)
+  allow:
+    - read_file(**)
+    - git_status
+    - git_diff
+
+# Hooks — shell commands run on lifecycle events. A non-zero PreToolUse exit
+# BLOCKS the tool (its output is fed back to the model). Event JSON is on stdin.
+hooks: {}
+  # PreToolUse:
+  #   - matcher: "write_file|edit_file|multi_edit"
+  #     command: "ruff check ."
+  # PostToolUse:
+  #   - matcher: "*"
+  #     command: "echo done"
+  # Stop:
+  #   - command: "echo finished"
 
 # Model used for sub-agents (spawn_agent). Empty = same as the main model.
 # A cheaper/faster model here saves cost on delegated sub-tasks.

@@ -64,12 +64,13 @@ def command_output(call_id: str, text: str) -> dict:
     return {"type": "command_output", "id": call_id, "text": text}
 
 
-def usage(prompt: int, completion: int, total_session: int) -> dict:
+def usage(prompt: int, completion: int, total_session: int, cost: float = 0.0) -> dict:
     return {
         "type": "usage",
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "session_tokens": total_session,
+        "session_cost": round(cost, 4),
     }
 
 
@@ -112,6 +113,7 @@ def subagent_end(call_id: str, summary: str) -> dict:
 class ApprovalDecision:
     approved: bool
     feedback: Optional[str] = None  # optional user note fed back to the model
+    always: bool = False  # "always allow" — persist an allow rule for this tool
 
 
 class AgentIO(abc.ABC):

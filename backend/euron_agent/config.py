@@ -52,6 +52,9 @@ class AgentConfig:
     retry_backoff: float = 1.5
     # ignore .gitignore-listed paths in addition to the configured globs
     use_gitignore: bool = True
+    # extended thinking / reasoning (best-effort, provider-dependent)
+    thinking: bool = False
+    reasoning_effort: Optional[str] = None  # "low" | "medium" | "high"
 
 
 @dataclass
@@ -63,6 +66,8 @@ class Config:
     mcp_servers: dict = field(default_factory=dict)
     web: dict = field(default_factory=dict)
     subagent_model: Optional[str] = None
+    permissions: dict = field(default_factory=dict)
+    hooks: dict = field(default_factory=dict)
 
 
 DEFAULT_IGNORE = [
@@ -207,6 +212,8 @@ def load_config(
         retry_attempts=int(agent_raw.get("retry_attempts", 3)),
         retry_backoff=float(agent_raw.get("retry_backoff", 1.5)),
         use_gitignore=bool(agent_raw.get("use_gitignore", True)),
+        thinking=bool(agent_raw.get("thinking", False)),
+        reasoning_effort=agent_raw.get("reasoning_effort"),
     )
 
     ignore = raw.get("ignore") or DEFAULT_IGNORE
@@ -237,4 +244,6 @@ def load_config(
         mcp_servers=mcp_servers,
         web=web,
         subagent_model=raw.get("subagent_model"),
+        permissions=raw.get("permissions", {}) or {},
+        hooks=raw.get("hooks", {}) or {},
     )

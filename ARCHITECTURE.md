@@ -62,6 +62,11 @@ backend/
     webtools.py        # web_search (pluggable) + web_fetch
     background.py      # long-running background process manager
     mcp_client.py      # MCP server client → external tools (optional)
+    permissions.py     # allow/ask/deny rule engine
+    hooks.py           # shell-command hooks on lifecycle events
+    memory.py          # AGENTS.md/EURON.md project memory
+    commands.py        # custom slash commands (.euron/commands/*.md)
+    pricing.py         # token → cost estimation
     server.py          # FastAPI: /ws (streaming+approval) + REST + dynamic port + auth
     cli.py             # run / chat / serve / providers / init  (+ TerminalIO)
   pyproject.toml       # packaging → PyPI dist "euron-coding-agent", CLI "euron-agent"
@@ -308,15 +313,21 @@ explicit CLI/extension overrides. Any OpenAI-compatible endpoint works by settin
   `git_status`/`git_diff`/`git_commit`.
 - ✅ **`/compact`** — LLM summarization of older turns.
 
-### Roadmap (0.4.0 — Phases 3–4)
-- ◻ **Project memory** (`AGENTS.md`/`EURON.md` auto-loaded) and **custom slash
-  commands** (`.euron/commands/*.md`).
-- ◻ **Hooks** (PreToolUse/PostToolUse/Stop) and a **permissions engine**
-  (allow/ask/deny by tool+glob) replacing the coarse auto-approve flags.
-- ◻ **Extended thinking** (provider-native where available) surfaced in the UI.
-- ◻ **Multimodal image input** to vision models; **cost** estimation (pricing).
-- ◻ **Richer webview** (markdown + highlighted diffs, `@file` autocomplete,
-  in-panel model picker), and an editor-native diagnostics loop.
+**0.4.0 — config, control, multimodal:**
+- ✅ **Permissions engine** — allow/ask/deny by tool+glob, "Always" persists a rule.
+- ✅ **Hooks** — PreToolUse (blocking) / PostToolUse / Stop / UserPromptSubmit.
+- ✅ **Project memory** (`AGENTS.md`) + **custom slash commands**
+  (`.euron/commands/*.md`).
+- ✅ **Cost tracking** (token → $) and **extended thinking** (provider-native,
+  guarded).
+- ✅ **Multimodal image input** to vision models; markdown rendering + "Fix
+  Diagnostics" in the extension.
+
+### Still on the roadmap
+- ◻ `@file` **autocomplete** in the webview; syntax-highlighted diffs.
+- ◻ Deeper **diagnostics loop** (auto-feed errors after each edit, not on demand).
+- ◻ Semantic summarization / optional RAG for very large repos.
+- ◻ Undo via VS Code's native `WorkspaceEdit` (currently the built-in checkpointer).
 
 ### Intentionally out of scope (to stay light & model-agnostic)
 - ❌ Anthropic-locked features as hard deps (prompt caching, server-side web

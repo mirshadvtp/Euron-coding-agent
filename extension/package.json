@@ -2,7 +2,7 @@
   "name": "euron-agent",
   "displayName": "Euron Coding Agent",
   "description": "Lightweight agentic coding assistant (Cline/OpenCode-style). Plan, edit, and run code with approvals. Works with Euron/Euri, OpenAI, OpenRouter, Anthropic, Ollama, or any OpenAI-compatible/self-hosted model.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "Euron",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -111,6 +111,28 @@
         "title": "Select Workspace Folder",
         "category": "Euron Agent",
         "icon": "$(folder)"
+      },
+      {
+        "command": "euronAgent.setModel",
+        "title": "Set Model",
+        "category": "Euron Agent"
+      },
+      {
+        "command": "euronAgent.attachImage",
+        "title": "Attach Image",
+        "category": "Euron Agent",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "euronAgent.initMemory",
+        "title": "Create Project Memory (AGENTS.md)",
+        "category": "Euron Agent"
+      },
+      {
+        "command": "euronAgent.fixDiagnostics",
+        "title": "Fix Diagnostics",
+        "category": "Euron Agent",
+        "icon": "$(debug-alt)"
       }
     ],
     "menus": {

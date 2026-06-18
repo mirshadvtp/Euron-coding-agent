@@ -449,3 +449,113 @@ def test_mcp_routing(tmp_path):
     run(sess.run("use mcp"))
     assert any("mcp ok" in (m.get("content") or "")
                for m in sess.messages if m.get("role") == "tool")
+
+
+# --------------------------------------------------------------------------- #
+# 0.4.0: permissions / hooks / memory / commands / pricing / multimodal
+# --------------------------------------------------------------------------- #
+def test_permissions_rules(tmp_path, monkeypatch):
+    import euron_agent.permissions as pm
+    monkeypatch.setattr(pm, "PERMISSIONS_FILE", tmp_path / "x.json")
+    perms = pm.Permissions.from_config(
+        {"deny": ["run_command(rm -rf*)"], "allow": ["read_file(**)"]},
+        auto_writes=False, auto_commands=False,
+    )
+    assert perms.decide("run_command", {"command": "rm -rf /"}) == "deny"
+    assert perms.decide("read_file", {"path": "x"}) == "allow"
+    assert perms.decide("run_command", {"command": "ls"}) == "ask"
+    assert perms.decide("write_file", {"path": "x"}) == "ask"
+
+
+def test_always_allow(tmp_path, monkeypatch):
+    import euron_agent.permissions as pm
+    monkeypatch.setattr(pm, "PERMISSIONS_FILE", tmp_path / "p.json")
+    p = pm.Permissions(default_writes="ask")
+    assert p.decide("write_file", {"path": "a.py"}) == "ask"
+    p.add_always_allow("write_file", {"path": "a.py"})
+    assert p.decide("write_file", {"path": "a.py"}) == "allow"
+
+
+def test_loop_permission_deny(tmp_path, monkeypatch):
+    import euron_agent.permissions as pm
+    monkeypatch.setattr(pm, "PERMISSIONS_FILE", tmp_path / "pd.json")
+    (tmp_path / "d.txt").write_text("x", encoding="utf-8")
+    cfg = load_config(provider="openai", api_key="x")
+    cfg.permissions = {"deny": ["delete_file(**)"]}
+    io = CollectIO()
+    sess = AgentSession(str(tmp_path), cfg, io)
+    sess.client = ScriptedClient([
+        LLMResponse(content="", tool_calls=[ToolCall("1", "delete_file", {"path": "d.txt"})]),
+        LLMResponse(content="ok", tool_calls=[]),
+    ])
+    run(sess.run("delete it"))
+    assert (tmp_path / "d.txt").exists()
+    assert any("Denied" in (m.get("content") or "")
+               for m in sess.messages if m.get("role") == "tool")
+
+
+def test_loop_hook_blocks(tmp_path, monkeypatch):
+    import euron_agent.permissions as pm
+    monkeypatch.setattr(pm, "PERMISSIONS_FILE", tmp_path / "ph.json")
+    cfg = load_config(provider="openai", api_key="x")
+    cfg.agent.auto_approve_writes = True
+    cfg.hooks = {"PreToolUse": [{"matcher": "write_file", "command": "exit 3"}]}
+    io = CollectIO()
+    sess = AgentSession(str(tmp_path), cfg, io)
+    sess.client = ScriptedClient([
+        LLMResponse(content="", tool_calls=[ToolCall("1", "write_file", {"path": "h.txt", "content": "x"})]),
+        LLMResponse(content="ok", tool_calls=[]),
+    ])
+    run(sess.run("write h"))
+    assert not (tmp_path / "h.txt").exists()
+    assert any("Blocked by PreToolUse" in (m.get("content") or "")
+               for m in sess.messages if m.get("role") == "tool")
+
+
+def test_memory(tmp_path, monkeypatch):
+    import euron_agent.memory as mem
+    monkeypatch.setattr(mem, "USER_FILE", tmp_path / "nouser.md")
+    (tmp_path / "AGENTS.md").write_text("PROJECT_RULE_X", encoding="utf-8")
+    assert "PROJECT_RULE_X" in mem.load_memory(str(tmp_path))
+    sub = tmp_path / "proj"
+    sub.mkdir()
+    p = mem.write_template(str(sub))
+    assert p.exists() and "Project memory" in p.read_text()
+
+
+def test_custom_commands(tmp_path):
+    from euron_agent.commands import expand_command, load_commands
+    d = tmp_path / ".euron" / "commands"
+    d.mkdir(parents=True)
+    (d / "review.md").write_text("Review $ARGUMENTS for bugs. First: $1", encoding="utf-8")
+    cmds = load_commands(str(tmp_path))
+    assert "review" in cmds
+    out = expand_command(cmds["review"], "file.py extra")
+    assert "file.py extra" in out and "First: file.py" in out
+
+
+def test_pricing():
+    from euron_agent.pricing import cost_for
+    assert abs(cost_for("gpt-4o-mini", 1_000_000, 0) - 0.15) < 1e-9
+    assert cost_for("unknown-model", 1000, 1000) == 0.0
+    assert cost_for("qwen2.5-coder:7b", 1000, 1000) == 0.0
+
+
+def test_multimodal(tmp_path):
+    sess, io = make_session(tmp_path, [LLMResponse(content="saw it", tool_calls=[])])
+    run(sess.run("describe", images=["data:image/png;base64,AAAA"]))
+    user = [m for m in sess.messages if m["role"] == "user"][-1]
+    assert isinstance(user["content"], list)
+    assert any(b.get("type") == "image_url" for b in user["content"])
+    # usage event now carries a cost field
+    assert any("session_cost" in e for e in io.events if e["type"] == "usage")
+
+
+def test_anthropic_image_conversion():
+    from euron_agent.llm import AnthropicClient
+    msgs = [{"role": "user", "content": [
+        {"type": "text", "text": "hi"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}]}]
+    _system, conv = AnthropicClient._to_anthropic_messages(msgs)
+    blocks = conv[0]["content"]
+    assert any(b["type"] == "image" for b in blocks)

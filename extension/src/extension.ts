@@ -75,6 +75,65 @@ export function activate(context: vscode.ExtensionContext) {
         `Euron Agent plan mode: ${!cur ? 'ON (next task plans first)' : 'off'}`
       );
     }),
+    vscode.commands.registerCommand('euronAgent.setModel', async () => {
+      const cfg = vscode.workspace.getConfiguration('euronAgent');
+      const value = await vscode.window.showInputBox({
+        prompt: 'Model id to use (empty = provider default)',
+        value: cfg.get<string>('model') || ''
+      });
+      if (value !== undefined) {
+        await cfg.update('model', value, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`Euron Agent model: ${value || '(provider default)'}`);
+      }
+    }),
+    vscode.commands.registerCommand('euronAgent.attachImage', async () => {
+      const picks = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }
+      });
+      if (picks && picks[0]) {
+        const bytes = await vscode.workspace.fs.readFile(picks[0]);
+        const ext = picks[0].fsPath.split('.').pop()?.toLowerCase() || 'png';
+        const mime = ext === 'jpg' ? 'jpeg' : ext;
+        const b64 = Buffer.from(bytes).toString('base64');
+        provider.addImage(`data:image/${mime};base64,${b64}`);
+      }
+    }),
+    vscode.commands.registerCommand('euronAgent.initMemory', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0];
+      if (!ws) {
+        vscode.window.showErrorMessage('Open a folder first.');
+        return;
+      }
+      const uri = vscode.Uri.joinPath(ws.uri, 'AGENTS.md');
+      try {
+        await vscode.workspace.fs.stat(uri);
+        vscode.window.showInformationMessage('AGENTS.md already exists.');
+      } catch {
+        const tpl = '# Project memory for the Euron Agent\n\n' +
+          'Put standing instructions and conventions here; they are auto-loaded into context.\n\n' +
+          '## Commands\n- Build:\n- Test:\n- Lint:\n\n## Conventions\n- \n';
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(tpl, 'utf8'));
+        vscode.window.showTextDocument(uri);
+      }
+    }),
+    vscode.commands.registerCommand('euronAgent.fixDiagnostics', async () => {
+      const items: string[] = [];
+      for (const [uri, diags] of vscode.languages.getDiagnostics()) {
+        for (const d of diags) {
+          if (d.severity === vscode.DiagnosticSeverity.Error) {
+            const rel = vscode.workspace.asRelativePath(uri);
+            items.push(`${rel}:${d.range.start.line + 1} ${d.message}`);
+          }
+        }
+      }
+      if (items.length === 0) {
+        vscode.window.showInformationMessage('No error diagnostics found.');
+        return;
+      }
+      await vscode.commands.executeCommand('workbench.view.extension.euronAgent');
+      provider.runText('Fix these diagnostics:\n' + items.slice(0, 40).join('\n'));
+    }),
     vscode.commands.registerCommand('euronAgent.toggleAutoApprove', async () => {
       const cur = context.globalState.get<boolean>(KEY_AUTOAPPROVE) || false;
       await context.globalState.update(KEY_AUTOAPPROVE, !cur);
@@ -408,6 +467,16 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private ws?: WebSocket;
   private connecting = false;
+  private pendingImages: string[] = [];
+
+  addImage(dataUrl: string) {
+    this.pendingImages.push(dataUrl);
+    this.view?.webview.postMessage({ type: 'info', message: `image attached (${this.pendingImages.length})` });
+  }
+
+  async runText(text: string) {
+    await this.runTask(text);
+  }
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -424,13 +493,19 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
           await this.runTask(msg.text);
           break;
         case 'approval':
-          this.send({ type: 'approval', id: msg.id, approved: msg.approved, feedback: msg.feedback });
+          this.send({
+            type: 'approval', id: msg.id, approved: msg.approved,
+            always: msg.always, feedback: msg.feedback
+          });
           break;
         case 'cancel':
           this.stopTask();
           break;
         case 'undo':
           this.undo();
+          break;
+        case 'attachImage':
+          vscode.commands.executeCommand('euronAgent.attachImage');
           break;
       }
     });
@@ -496,7 +571,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     init.token = this.backend.token;
     this.send(init);
-    this.send({ type: 'run', task: text });
+    const images = this.pendingImages.splice(0);
+    this.send({ type: 'run', task: text, images: images.length ? images : undefined });
   }
 
   private async ensureConnected(): Promise<boolean> {
@@ -584,6 +660,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="log"></div>
   <div id="composer">
     <textarea id="prompt" rows="3" placeholder="Ask Euron Agent to change your code… (Ctrl/Cmd+Enter)"></textarea>
+    <button id="attach" title="Attach image">📎</button>
     <button id="send">Run</button>
     <button id="stop" style="display:none;">Stop</button>
   </div>

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+Phases 3–4 — config, control, and a richer UI (model-agnostic).
+
+- **Permissions engine** — allow / ask / deny rules by tool + glob, with an
+  **Always** button that persists an allow rule.
+- **Hooks** — run shell commands on PreToolUse/PostToolUse/Stop/UserPromptSubmit
+  (a non-zero PreToolUse exit blocks the tool).
+- **Project memory** — auto-loads `AGENTS.md`/`EURON.md` into context;
+  "Create Project Memory" command / CLI `/init`.
+- **Custom slash commands** — `.euron/commands/*.md` with `$ARGUMENTS`.
+- **Cost tracking** — live $ estimate alongside tokens.
+- **Multimodal** — attach images (📎) to vision-capable models.
+- **Extended thinking** — provider-native where available (Anthropic thinking,
+  OpenAI reasoning effort), guarded so non-reasoning models are unaffected.
+- **Richer panel** — markdown rendering, "Fix Diagnostics" command, Set Model.
+
 ## 0.3.0
 
 Claude-Code-style capabilities (Phases 1–2), staying model-agnostic.

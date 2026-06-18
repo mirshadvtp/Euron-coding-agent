@@ -47,6 +47,23 @@ body {
   font-style: italic;
   font-size: 0.85em;
 }
+.md-code {
+  background: var(--vscode-textCodeBlock-background);
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+}
+.msg.assistant code {
+  background: var(--vscode-textCodeBlock-background);
+  padding: 0 3px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+#attach {
+  padding: 5px 8px;
+}
 .msg.plan {
   border: 1px solid var(--vscode-focusBorder);
   border-radius: 6px;

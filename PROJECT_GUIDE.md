@@ -557,6 +557,34 @@ These extend the brain without changing its core shape. Read them after `loop.py
   (`glob`, `multi_edit`, web, background, git) are plain entries in
   `tools.TOOL_FUNCS`; meta-tools live in `tool_schemas.LOOP_TOOLS`.
 
+## Phase I — control & config modules (0.4.0)
+
+### `permissions.py`
+- `Permissions.decide(tool, args) → allow|ask|deny` from rules (tool+glob) and
+  per-category defaults; `add_always_allow` persists a rule. **The gate the loop
+  consults instead of the old auto-approve flags.**
+
+### `hooks.py`
+- `HookRunner.run(event, payload)` runs configured shell commands; a non-zero
+  **PreToolUse** exit blocks the tool. **User-defined automation around tools.**
+
+### `memory.py`
+- `load_memory` pulls `AGENTS.md`/`EURON.md` (+ global) into the system prompt;
+  `write_template` scaffolds one. **Standing project instructions, always in context.**
+
+### `commands.py`
+- `load_commands` + `expand_command` turn `.euron/commands/*.md` into `/name`
+  prompts (`$ARGUMENTS`, `$1`…). **Reusable, shareable prompts.**
+
+### `pricing.py`
+- `cost_for(model, in, out)` — substring-matched price table → USD. **The $ in the
+  usage line.**
+
+### What else changed in `loop.py` (0.4.0)
+- The gate is now `permissions.decide(...)` (allow/ask/deny) with PreToolUse/
+  PostToolUse hooks around execution; `run()` takes **images** (multimodal),
+  emits **cost** in the usage event, and injects **memory** into the system prompt.
+
 ## How to give the 60-second version (for a meeting)
 
 1. "It's an agentic coding assistant with the brain in **Python** and a thin **VS

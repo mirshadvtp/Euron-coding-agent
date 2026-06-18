@@ -89,9 +89,11 @@ class TerminalIO(AgentIO):
         elif t == "error":
             console.print(f"[red]error:[/red] {event['message']}")
         elif t == "usage":
+            cost = event.get("session_cost", 0.0)
+            cost_str = f" · ${cost:.4f}" if cost else ""
             console.print(
                 f"[dim]· {event['prompt_tokens']}+{event['completion_tokens']} tok "
-                f"(session {event['session_tokens']})[/dim]"
+                f"(session {event['session_tokens']}{cost_str})[/dim]"
             )
         elif t == "info":
             console.print(f"[dim]ℹ {event['message']}[/dim]")
@@ -138,12 +140,14 @@ class TerminalIO(AgentIO):
             return ApprovalDecision(approved=True)
         answer = await asyncio.to_thread(
             Prompt.ask,
-            f"[yellow]{title}[/yellow] (y/n, or type feedback to reject)",
+            f"[yellow]{title}[/yellow] (y=yes, a=always, n=no, or type feedback)",
             default="y",
         )
         a = answer.strip().lower()
         if a in ("y", "yes", ""):
             return ApprovalDecision(approved=True)
+        if a in ("a", "always"):
+            return ApprovalDecision(approved=True, always=True)
         if a in ("n", "no"):
             return ApprovalDecision(approved=False, feedback="rejected by user")
         return ApprovalDecision(approved=False, feedback=answer.strip())
@@ -221,6 +225,7 @@ HELP = """[bold]commands[/bold]
   /providers         list known providers
   /plan              plan mode for the next task (research → approve → execute)
   /compact           summarize the conversation to free up context
+  /init              create an AGENTS.md project-memory file
   /undo              revert the file changes from the last task
   /reset             clear the conversation context
   /yes               toggle auto-approve for edits & commands
@@ -346,8 +351,13 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
             user_settings.set_provider_field(provider, "base_url", value.strip())
             _reload(session, args)
             console.print(f"[green]base_url → {session.config.provider.base_url}[/green]")
+    elif cmd == "/init":
+        from .memory import write_template
+
+        p = write_template(session.workspace)
+        console.print(f"[green]wrote {p.name}[/green] — edit it with project instructions.")
     else:
-        console.print(f"[red]unknown command[/red] {cmd}  (/help)")
+        return "unknown"
     return "handled"
 
 
@@ -379,9 +389,23 @@ async def _chat(args) -> None:
         if not msg:
             continue
         if msg.startswith("/"):
-            if await _handle_command(msg, session, args, io) == "exit":
+            result = await _handle_command(msg, session, args, io)
+            if result == "exit":
                 break
-            continue
+            if result == "unknown":
+                # maybe a custom command from .euron/commands/<name>.md
+                from .commands import expand_command, load_commands
+
+                name, _, rest = msg[1:].partition(" ")
+                custom = load_commands(workspace)
+                if name in custom:
+                    msg = expand_command(custom[name], rest.strip())
+                    # fall through and run as a task
+                else:
+                    console.print(f"[red]unknown command[/red] /{name}  (/help)")
+                    continue
+            else:
+                continue
         if _key_missing(session.config):
             console.print(
                 "[yellow]No API key set — use /key first (or /provider to switch).[/yellow]"

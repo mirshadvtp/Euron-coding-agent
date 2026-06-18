@@ -29,6 +29,17 @@
     return (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   }
 
+  // Minimal, safe markdown: escape first, then apply a few transforms.
+  function renderMarkdown(text) {
+    let s = escapeHtml(text || '');
+    s = s.replace(/```([\s\S]*?)```/g, (_m, code) => '<pre class="md-code">' + code.replace(/^\n/, '') + '</pre>');
+    s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    s = s.replace(/^\s*#{1,6}\s+(.*)$/gm, '<b>$1</b>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    s = s.replace(/^\s*[-*]\s+(.*)$/gm, '• $1');
+    return s.replace(/\n/g, '<br/>');
+  }
+
   function renderDiff(patch) {
     return patch
       .split('\n')
@@ -64,6 +75,8 @@
   sendBtn.addEventListener('click', run);
   stopBtn.addEventListener('click', () => vscode.postMessage({ command: 'cancel' }));
   undoBtn.addEventListener('click', () => vscode.postMessage({ command: 'undo' }));
+  const attachBtn = document.getElementById('attach');
+  if (attachBtn) attachBtn.addEventListener('click', () => vscode.postMessage({ command: 'attachImage' }));
   promptEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -97,17 +110,25 @@
     const yes = document.createElement('button');
     yes.textContent = 'Approve';
     yes.className = 'approve';
+    const always = document.createElement('button');
+    always.textContent = 'Always';
+    always.className = 'approve';
     const no = document.createElement('button');
     no.textContent = 'Reject';
     no.className = 'reject';
-    const finish = (approved) => {
-      vscode.postMessage({ command: 'approval', id: ev.id, approved, feedback: fb.value || undefined });
-      yes.disabled = no.disabled = true;
-      head.textContent = (approved ? '✓ Approved: ' : '✗ Rejected: ') + ev.name;
+    const finish = (approved, alwaysAllow) => {
+      vscode.postMessage({
+        command: 'approval', id: ev.id, approved, always: !!alwaysAllow,
+        feedback: fb.value || undefined
+      });
+      yes.disabled = no.disabled = always.disabled = true;
+      head.textContent = (approved ? (alwaysAllow ? '✓✓ Always: ' : '✓ Approved: ') : '✗ Rejected: ') + ev.name;
     };
-    yes.addEventListener('click', () => finish(true));
-    no.addEventListener('click', () => finish(false));
+    yes.addEventListener('click', () => finish(true, false));
+    always.addEventListener('click', () => finish(true, true));
+    no.addEventListener('click', () => finish(false, false));
     row.appendChild(yes);
+    row.appendChild(always);
     row.appendChild(no);
     wrap.appendChild(row);
     log.appendChild(wrap);
@@ -129,6 +150,11 @@
         scroll();
         break;
       case 'assistant_message':
+        if (assistantEl) {
+          assistantEl.innerHTML = renderMarkdown(ev.text);
+        } else if (ev.text) {
+          add('assistant', renderMarkdown(ev.text));
+        }
         assistantEl = null;
         break;
       case 'tool_start': {
@@ -158,7 +184,8 @@
         break;
       }
       case 'usage':
-        tokensEl.textContent = '⛁ ' + ev.session_tokens + ' tokens';
+        tokensEl.textContent = '⛁ ' + ev.session_tokens + ' tok' +
+          (ev.session_cost ? ' · $' + Number(ev.session_cost).toFixed(4) : '');
         break;
       case 'thinking':
         add('thinking', '💭 ' + escapeHtml(ev.text));

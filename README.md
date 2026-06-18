@@ -33,6 +33,9 @@ VS Code webview ──postMessage──> Extension host ──WebSocket──> P
 - **Web** `web_search` + `web_fetch` · **git** tools · **background** processes
 - `glob`, `multi_edit`, streaming command output, `@file` mentions
 - **Undo/checkpoints**, **cancel/stop**, **persistent history**, **`/compact`**
+- **Permissions** (allow/ask/deny + "Always") · **hooks** · **project memory**
+  (`AGENTS.md`) · **custom slash commands** (`.euron/commands/*.md`)
+- **Cost tracking** · **multimodal image input** (📎) · **extended thinking**
 - **Cloud/self-host**: `serve --host 0.0.0.0 --token …` with bearer auth
 - Works with **any** OpenAI-compatible or Anthropic model; capabilities degrade
   gracefully when a model lacks them.

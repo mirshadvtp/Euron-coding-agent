@@ -15,15 +15,17 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import events as ev
-from . import gitignore, history
+from . import gitignore, history, memory, pricing
 from .checkpoints import Checkpointer
 from .config import Config
 from .context import compact_history, expand_mentions
 from .events import AgentIO, ApprovalDecision
+from .hooks import HookRunner
 from .llm import LLMError, build_client
 from .mcp_client import MCPManager, is_mcp_tool
+from .permissions import Permissions
 from .prompts import system_prompt
-from .tool_schemas import LOOP_TOOLS, MUTATING_TOOLS, schemas_for
+from .tool_schemas import LOOP_TOOLS, schemas_for
 from .tools import ToolContext, execute, list_files, preview_for, run_command
 
 _FILE_MUTATORS = {"write_file", "edit_file", "multi_edit", "create_file", "delete_file"}
@@ -76,11 +78,18 @@ class AgentSession:
 
         self.checkpointer = Checkpointer()
         self.session_tokens = 0
+        self.session_cost = 0.0
         self.persist = persist
         self.plan_mode = plan_mode
         self.depth = depth
         self.todos: list = []
         self.mcp = MCPManager(config.mcp_servers if depth == 0 else {})
+        self.permissions = Permissions.from_config(
+            config.permissions,
+            auto_writes=config.agent.auto_approve_writes,
+            auto_commands=config.agent.auto_approve_commands,
+        )
+        self.hooks = HookRunner(config.hooks, workspace)
         self._cancelled = False
         self.messages: list[dict] = history.load_history(workspace) if persist else []
 
@@ -91,32 +100,23 @@ class AgentSession:
     def undo(self) -> list[str]:
         return self.checkpointer.undo_last_turn()
 
+    def _system_content(self) -> str:
+        tree = list_files(self.ctx).output
+        base = system_prompt(self.workspace, tree)
+        mem = memory.load_memory(self.workspace)
+        return base + ("\n\n# Memory / project instructions\n" + mem if mem else "")
+
     def _ensure_system(self) -> None:
         if not self.messages:
-            tree = list_files(self.ctx).output
-            self.messages.append(
-                {"role": "system", "content": system_prompt(self.workspace, tree)}
-            )
+            self.messages.append({"role": "system", "content": self._system_content()})
         elif self.messages[0].get("role") != "system":
-            tree = list_files(self.ctx).output
-            self.messages.insert(
-                0, {"role": "system", "content": system_prompt(self.workspace, tree)}
-            )
-
-    def _auto_approved(self, name: str) -> bool:
-        if name not in MUTATING_TOOLS and not is_mcp_tool(name):
-            return self.config.agent.auto_approve_reads
-        if name in ("run_command", "bash_background"):
-            return self.config.agent.auto_approve_commands
-        if is_mcp_tool(name):
-            return self.config.agent.auto_approve_commands
-        return self.config.agent.auto_approve_writes
+            self.messages.insert(0, {"role": "system", "content": self._system_content()})
 
     def _tools_for_turn(self) -> list:
         return schemas_for(self.plan_mode) + (self.mcp.schemas() if not self.plan_mode else [])
 
     # ------------------------------------------------------------------ #
-    async def run(self, task: str) -> None:
+    async def run(self, task: str, images: list | None = None) -> None:
         self._cancelled = False
         if not self.mcp.started:
             try:
@@ -127,9 +127,21 @@ class AgentSession:
                 await self.io.emit(ev.info(f"MCP unavailable: {e}"))
         self._ensure_system()
         self.checkpointer.begin_turn()
+
+        if self.hooks.active:
+            await asyncio.to_thread(self.hooks.run, "UserPromptSubmit", {"prompt": task})
+
         if self.plan_mode:
             task = "[PLAN MODE — research and propose a plan with update_plan; do NOT edit yet]\n" + task
-        self.messages.append({"role": "user", "content": expand_mentions(task, self.ctx)})
+        expanded = expand_mentions(task, self.ctx)
+        if images:
+            content = [{"type": "text", "text": expanded}] + [
+                {"type": "image_url", "image_url": {"url": u}} for u in images
+            ]
+        else:
+            content = expanded
+        self.messages.append({"role": "user", "content": content})
+
         try:
             await self._agent_loop()
         except LLMError as e:
@@ -139,6 +151,8 @@ class AgentSession:
             await self.io.emit(ev.error(f"Agent error: {type(e).__name__}: {e}"))
             await self.io.emit(ev.done("failed"))
         finally:
+            if self.hooks.active:
+                await asyncio.to_thread(self.hooks.run, "Stop", {})
             if self.persist:
                 history.save_history(self.workspace, self.messages)
 
@@ -168,8 +182,13 @@ class AgentSession:
             )
 
             self.session_tokens += resp.prompt_tokens + resp.completion_tokens
+            self.session_cost += pricing.cost_for(
+                self.config.provider.model, resp.prompt_tokens, resp.completion_tokens
+            )
             await self.io.emit(
-                ev.usage(resp.prompt_tokens, resp.completion_tokens, self.session_tokens)
+                ev.usage(
+                    resp.prompt_tokens, resp.completion_tokens, self.session_tokens, self.session_cost
+                )
             )
 
             if resp.content:
@@ -216,17 +235,39 @@ class AgentSession:
 
         await self.io.emit(ev.tool_start(tc.id, tc.name, tc.arguments))
 
-        # Approval gate (mutating tools + MCP tools).
-        gated = tc.name in MUTATING_TOOLS or is_mcp_tool(tc.name)
-        if gated and not self._auto_approved(tc.name):
-            preview = preview_for(self.ctx, tc.name, tc.arguments) if not is_mcp_tool(tc.name) else \
-                f"{tc.name}({json.dumps(tc.arguments)[:400]})"
-            decision = await self.io.request_approval(
+        # Permission decision: allow / ask / deny.
+        decision = self.permissions.decide(tc.name, tc.arguments)
+        if decision == "deny":
+            msg = f"Denied by permission policy: {tc.name} is not allowed."
+            await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
+            self._append_tool_result(tc.id, msg)
+            return
+        if decision == "ask":
+            preview = (
+                preview_for(self.ctx, tc.name, tc.arguments)
+                if not is_mcp_tool(tc.name)
+                else f"{tc.name}({json.dumps(tc.arguments)[:400]})"
+            )
+            ok = await self.io.request_approval(
                 ev.approval_request(tc.id, tc.name, tc.arguments, preview)
             )
-            if not decision.approved:
-                note = decision.feedback or "no reason given"
+            if not ok.approved:
+                note = ok.feedback or "no reason given"
                 msg = f"User REJECTED this action. Reason: {note}. Do not retry it as-is."
+                await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
+                self._append_tool_result(tc.id, msg)
+                return
+            if ok.always:
+                self.permissions.add_always_allow(tc.name, tc.arguments)
+                await self.io.emit(ev.info(f"Always allowing {tc.name} for similar actions."))
+
+        # PreToolUse hook — non-zero exit blocks the tool.
+        if self.hooks.active:
+            blocked, hookmsg = await asyncio.to_thread(
+                self.hooks.run, "PreToolUse", {"tool": tc.name, "args": tc.arguments}
+            )
+            if blocked:
+                msg = f"Blocked by PreToolUse hook: {hookmsg}"
                 await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
                 self._append_tool_result(tc.id, msg)
                 return
@@ -258,6 +299,12 @@ class AgentSession:
             await self.io.emit(ev.diff(tc.arguments.get("path", ""), outcome.diff, outcome.is_new))
         await self.io.emit(ev.tool_result(tc.id, tc.name, outcome.ok, outcome.output))
         self._append_tool_result(tc.id, outcome.output or "(no output)")
+
+        if self.hooks.active:
+            await asyncio.to_thread(
+                self.hooks.run, "PostToolUse",
+                {"tool": tc.name, "args": tc.arguments, "ok": outcome.ok},
+            )
 
     async def _handle_loop_tool(self, tc) -> None:
         if tc.name == "todo_write":

@@ -31,7 +31,7 @@ from .config import Config, load_config
 from .events import AgentIO, ApprovalDecision
 from .loop import AgentSession
 
-app = FastAPI(title="Euron Agent", version="0.3.0")
+app = FastAPI(title="Euron Agent", version="0.4.0")
 app.state.token = None  # set by serve(); None disables auth (local dev/tests)
 
 
@@ -71,7 +71,11 @@ class WebSocketIO(AgentIO):
         fut = self.pending.pop(data.get("id"), None)
         if fut and not fut.done():
             fut.set_result(
-                ApprovalDecision(bool(data.get("approved", False)), data.get("feedback"))
+                ApprovalDecision(
+                    bool(data.get("approved", False)),
+                    data.get("feedback"),
+                    always=bool(data.get("always", False)),
+                )
             )
 
 
@@ -124,7 +128,7 @@ async def ws_endpoint(ws: WebSocket):
                 if running and not running.done():
                     await ws.send_json(ev.error("A task is already running."))
                     continue
-                running = asyncio.create_task(session.run(data["task"]))
+                running = asyncio.create_task(session.run(data["task"], data.get("images")))
 
             elif kind == "approval":
                 io.resolve_approval(data)
