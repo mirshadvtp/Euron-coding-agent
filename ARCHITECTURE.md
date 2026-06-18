@@ -67,6 +67,8 @@ backend/
     memory.py          # AGENTS.md/EURON.md project memory
     commands.py        # custom slash commands (.euron/commands/*.md)
     skills.py          # packaged skills (.euron/skills/<name>/SKILL.md)
+    plugins.py         # installable plugin bundles (skills + commands + MCP)
+    sessions.py        # named, resumable sessions + dashboard + search
     pricing.py         # token → cost estimation
     server.py          # FastAPI: /ws (streaming+approval) + REST + dynamic port + auth
     cli.py             # run / chat / serve / providers / init  (+ TerminalIO)
@@ -332,11 +334,16 @@ explicit CLI/extension overrides. Any OpenAI-compatible endpoint works by settin
 - ✅ **`/review`** (code review of the diff) + extension "Review Changes".
 - ✅ **`/usage`** breakdown (tokens, cost, per-tool, sub-agents) and **`/effort`**.
 
-### Still on the roadmap (buildable, local)
-- ◻ **Plugin system** (install bundles of skills/commands/MCP from a folder/URL).
-- ◻ **Named session resume + dashboard** (`/resume`, list, transcript search).
-- ◻ Editor-native **diff apply** (`WorkspaceEdit`) + `@file` autocomplete.
-- ◻ Deeper **diagnostics loop** (auto after each edit) and CI/PR-fix helpers.
+**0.6.0 — plugins, sessions, CI/PR, diagnostics:**
+- ✅ **Plugins** — install skills+commands+MCP bundles from a dir or `.zip` URL.
+- ✅ **Named sessions** — resume, dashboard (`euron-agent sessions`), `/search`.
+- ✅ **CI/PR helpers** — `git_branch`, `git_push`, `open_pr` (gh CLI).
+- ✅ **Auto-diagnostics loop** + reveal-changed-files in the extension.
+
+### Still on the roadmap (nice-to-have polish)
+- ◻ Editor-native **diff apply** via `WorkspaceEdit` (today: files are written +
+  revealed; undo is via the checkpointer).
+- ◻ `@file` **autocomplete** in the webview; syntax-highlighted diff view.
 
 ### Intentionally out of scope (different product surface)
 - ❌ Cursor **Tab** (proprietary inline-completion model) — we're an agent, not an

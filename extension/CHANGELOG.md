@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0
+
+The final buildable batch.
+
+- **Plugins** — install bundles of skills + commands + MCP servers from a folder
+  or `.zip` URL: `euron-agent plugin add <dir|url>` / `list` / `remove`.
+- **Named sessions** — resume + dashboard + transcript search:
+  `euron-agent sessions`, `chat --session <id>` / `--resume`, `/search <text>`.
+- **CI / PR helpers** — `git_branch`, `git_push`, `open_pr` (via the `gh` CLI).
+- **Auto-diagnostics** — after a task, offer to fix new error diagnostics in the
+  files the agent changed (`euronAgent.autoDiagnostics`).
+- **Reveal changed files** — the extension opens files as the agent edits them.
+
 ## 0.5.0
 
 Claude + Cursor power-ups.

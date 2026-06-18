@@ -16,6 +16,9 @@ MUTATING_TOOLS = {
     "git_commit",
     "worktree_add",
     "worktree_remove",
+    "git_branch",
+    "git_push",
+    "open_pr",
 }
 
 
@@ -254,6 +257,24 @@ TOOL_SCHEMAS = [
         "Remove a git worktree created with worktree_add. Requires approval.",
         {"name": {"type": "string"}},
         ["name"],
+    ),
+    _fn(
+        "git_branch",
+        "Create and switch to a new git branch. Requires approval.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _fn(
+        "git_push",
+        "Push the current branch to origin (sets upstream). Requires approval.",
+        {"branch": {"type": "string", "description": "Branch (default current HEAD)."}},
+        [],
+    ),
+    _fn(
+        "open_pr",
+        "Open a GitHub pull request for the current branch via the gh CLI. Requires approval.",
+        {"title": {"type": "string"}, "body": {"type": "string"}},
+        ["title"],
     ),
 ]
 

@@ -21,7 +21,10 @@ from .settings import SETTINGS_DIR
 
 
 def _dirs(workspace: str) -> list[Path]:
-    return [SETTINGS_DIR / "skills", Path(workspace) / ".euron" / "skills"]
+    from . import plugins
+
+    return [SETTINGS_DIR / "skills", *plugins.plugin_skill_dirs(),
+            Path(workspace) / ".euron" / "skills"]
 
 
 def _parse(text: str) -> tuple[str, str]:

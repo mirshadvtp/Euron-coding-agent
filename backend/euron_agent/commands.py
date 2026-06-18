@@ -16,7 +16,10 @@ from .settings import SETTINGS_DIR
 
 
 def _dirs(workspace: str) -> list[Path]:
-    return [SETTINGS_DIR / "commands", Path(workspace) / ".euron" / "commands"]
+    from . import plugins
+
+    return [SETTINGS_DIR / "commands", *plugins.plugin_command_dirs(),
+            Path(workspace) / ".euron" / "commands"]
 
 
 def load_commands(workspace: str) -> dict[str, str]:

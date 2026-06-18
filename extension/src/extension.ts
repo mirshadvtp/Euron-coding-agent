@@ -477,6 +477,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   private ws?: WebSocket;
   private connecting = false;
   private pendingImages: string[] = [];
+  private changedFiles = new Set<string>();
 
   addImage(dataUrl: string) {
     this.pendingImages.push(dataUrl);
@@ -515,6 +516,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'attachImage':
           vscode.commands.executeCommand('euronAgent.attachImage');
+          break;
+        case 'runFix':
+          vscode.commands.executeCommand('euronAgent.fixDiagnostics');
           break;
       }
     });
@@ -555,6 +559,41 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(event);
   }
 
+  private onBackendEvent(event: any) {
+    this.post(event);
+    if (event.type === 'diff' && event.path) {
+      this.changedFiles.add(event.path);
+      const ws = this.getWorkspace();
+      if (ws) {
+        const uri = vscode.Uri.file(path.join(ws, event.path));
+        vscode.window.showTextDocument(uri, { preview: true, preserveFocus: true })
+          .then(undefined, () => { /* file may not be open-able */ });
+      }
+    }
+    if (event.type === 'done') {
+      this.reportDiagnostics();
+    }
+  }
+
+  private reportDiagnostics() {
+    const cfg = vscode.workspace.getConfiguration('euronAgent');
+    if (!(cfg.get<boolean>('autoDiagnostics') ?? true) || this.changedFiles.size === 0) {
+      return;
+    }
+    const ws = this.getWorkspace();
+    let count = 0;
+    for (const [uri, diags] of vscode.languages.getDiagnostics()) {
+      const rel = ws ? vscode.workspace.asRelativePath(uri) : uri.fsPath;
+      if (this.changedFiles.has(rel)) {
+        count += diags.filter((d) => d.severity === vscode.DiagnosticSeverity.Error).length;
+      }
+    }
+    this.changedFiles.clear();
+    if (count > 0) {
+      this.post({ type: 'diagnostics', count });
+    }
+  }
+
   private send(obj: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(obj));
@@ -568,6 +607,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'done' });
       return;
     }
+    this.changedFiles.clear();
     const init = await buildInitPayload(this.context, workspace);
     if (!init) {
       this.post({ type: 'error', message: 'Provider not configured.' });
@@ -626,7 +666,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         this.ws = ws;
         ws.on('message', (data) => {
           try {
-            this.post(JSON.parse(data.toString()));
+            this.onBackendEvent(JSON.parse(data.toString()));
           } catch {
             /* ignore */
           }

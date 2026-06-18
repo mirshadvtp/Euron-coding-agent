@@ -279,13 +279,25 @@ def test_loop_mentions_inlined(tmp_path):
 
 
 def test_loop_persist_roundtrip(tmp_path, monkeypatch):
-    import euron_agent.history as h
-    monkeypatch.setattr(h, "SESSIONS_DIR", tmp_path / "sessions")
+    import euron_agent.sessions as s
+    monkeypatch.setattr(s, "SESSIONS_DIR", tmp_path / "sessions")
     sess, io = make_session(tmp_path, [LLMResponse(content="hello", tool_calls=[])], persist=True)
     run(sess.run("hi there"))
-    # a new session with persist should reload the prior messages
+    # a new persisted session for the same workspace resumes the latest one
     sess2, _ = make_session(tmp_path, [LLMResponse(content="again", tool_calls=[])], persist=True)
     assert any(m.get("content") == "hello" for m in sess2.messages)
+
+
+def test_sessions_list_and_search(tmp_path, monkeypatch):
+    import euron_agent.sessions as s
+    monkeypatch.setattr(s, "SESSIONS_DIR", tmp_path / "sessions")
+    sid = s.new_id()
+    s.save(sid, str(tmp_path), [{"role": "user", "content": "fix the LOGIN bug"}])
+    rows = s.list_sessions(str(tmp_path))
+    assert rows and rows[0]["title"].startswith("fix the LOGIN")
+    assert s.latest_id(str(tmp_path)) == sid
+    hits = s.search("login", str(tmp_path))
+    assert hits and hits[0]["id"] == sid
 
 
 # --------------------------------------------------------------------------- #
@@ -627,3 +639,30 @@ def test_usage_tracking(tmp_path):
     ])
     run(sess.run("list the files"))
     assert sess.tool_calls["list_files"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# 0.6.0: plugins
+# --------------------------------------------------------------------------- #
+def test_plugins(tmp_path, monkeypatch):
+    import euron_agent.plugins as pl
+    monkeypatch.setattr(pl, "PLUGINS_DIR", tmp_path / "plugins")
+    src = tmp_path / "myplug"
+    (src / "skills" / "foo").mkdir(parents=True)
+    (src / "commands").mkdir(parents=True)
+    (src / "euron-plugin.yaml").write_text(
+        "name: myplug\ndescription: test plugin\nmcp:\n  servers:\n    s1:\n      command: echo\n",
+        encoding="utf-8")
+    (src / "skills" / "foo" / "SKILL.md").write_text(
+        "---\ndescription: foo skill\n---\nbody", encoding="utf-8")
+    (src / "commands" / "hi.md").write_text("say hi to $ARGUMENTS", encoding="utf-8")
+
+    assert pl.install(str(src)) == "myplug"
+    assert any(p["name"] == "myplug" for p in pl.list_plugins())
+    assert "s1" in pl.plugin_mcp_servers()
+
+    from euron_agent.commands import load_commands
+    from euron_agent.skills import load_skills
+    assert "foo" in load_skills(str(tmp_path / "ws"))
+    assert "hi" in load_commands(str(tmp_path / "ws"))
+    assert pl.remove("myplug")

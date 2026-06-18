@@ -228,6 +228,7 @@ HELP = """[bold]commands[/bold]
   /compact           summarize the conversation to free up context
   /init              create an AGENTS.md project-memory file
   /skills            list available skills (.euron/skills/<name>/SKILL.md)
+  /search <text>     search your past sessions
   /usage             show tokens, cost, and tool usage this session
   /effort <level>    reasoning effort: low | medium | high
   /undo              revert the file changes from the last task
@@ -374,6 +375,18 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
                 console.print(f"  [cyan]{name}[/cyan] — {s['description']}")
         else:
             console.print("[dim]no skills found (add .euron/skills/<name>/SKILL.md)[/dim]")
+    elif cmd == "/search":
+        from . import sessions as _sessions
+
+        if not rest:
+            console.print("[red]usage: /search <text>[/red]")
+        else:
+            hits = _sessions.search(rest, session.workspace)
+            if hits:
+                for h in hits:
+                    console.print(f"  [cyan]{h['id']}[/cyan] {h['title']}  [dim]…{h['snippet']}…[/dim]")
+            else:
+                console.print("[dim]no matches in past sessions[/dim]")
     elif cmd == "/effort":
         level = (rest or "medium").strip().lower()
         if level not in ("low", "medium", "high"):
@@ -398,7 +411,9 @@ async def _chat(args) -> None:
     cfg = resolve_config(args)
     workspace = str(Path(args.workspace).resolve())
     io = TerminalIO(auto_approve=getattr(args, "yes", False))
-    session = AgentSession(workspace, cfg, io, persist=getattr(args, "resume", False))
+    sid = getattr(args, "session", None)
+    persist = bool(getattr(args, "resume", False) or sid)
+    session = AgentSession(workspace, cfg, io, persist=persist, session_id=sid)
     console.print(
         Panel(
             f"Euron Agent · [bold]{cfg.provider.name}[/bold] / {cfg.provider.model}\n"
@@ -481,6 +496,47 @@ def cmd_providers(args) -> None:
     _print_providers()
 
 
+def cmd_plugin(args) -> None:
+    from . import plugins
+
+    if args.action == "list":
+        rows = plugins.list_plugins()
+        if rows:
+            for p in rows:
+                console.print(f"  [cyan]{p['name']}[/cyan]  {p['description']}")
+        else:
+            console.print("[dim]no plugins installed[/dim]")
+    elif args.action == "add":
+        if not args.source:
+            console.print("[red]usage: euron-agent plugin add <dir|zip-url>[/red]")
+            return
+        name = plugins.install(args.source)
+        console.print(f"[green]installed plugin '{name}'[/green]")
+    elif args.action == "remove":
+        ok = plugins.remove(args.source or "")
+        console.print(f"[green]removed[/green]" if ok else "[yellow]not found[/yellow]")
+
+
+def cmd_sessions(args) -> None:
+    from rich.table import Table
+
+    from . import sessions
+
+    ws = None if getattr(args, "all", False) else str(Path(args.workspace).resolve())
+    rows = sessions.list_sessions(ws)
+    if not rows:
+        console.print("[dim]no saved sessions[/dim]")
+        return
+    table = Table(title="Sessions")
+    table.add_column("id")
+    table.add_column("title")
+    table.add_column("workspace")
+    for r in rows[:40]:
+        table.add_row(r["id"], (r.get("title") or "")[:50], (r.get("workspace") or "")[-40:])
+    console.print(table)
+    console.print("[dim]resume with: euron-agent chat --session <id>[/dim]")
+
+
 # Embedded templates so `init` works even from a pip install (the example files
 # are not shipped inside the wheel).
 _CONFIG_TEMPLATE = """# Euron Agent config. `active` picks a provider profile below.
@@ -556,7 +612,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("chat", help="Interactive REPL")
     c.add_argument("--yes", "-y", action="store_true", help="Auto-approve all actions")
-    c.add_argument("--resume", action="store_true", help="Resume this workspace's saved history")
+    c.add_argument("--resume", action="store_true", help="Resume the latest session for this workspace")
+    c.add_argument("--session", help="Resume a specific session id (see: euron-agent sessions)")
     c.set_defaults(func=cmd_chat)
 
     s = sub.add_parser("serve", help="Start the FastAPI server")
@@ -569,6 +626,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("providers", help="List configured providers").set_defaults(func=cmd_providers)
     sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(func=cmd_init)
+
+    pl = sub.add_parser("plugin", help="Manage plugins (skills/commands/MCP bundles)")
+    pl.add_argument("action", choices=["add", "list", "remove"])
+    pl.add_argument("source", nargs="?", help="Plugin dir / .zip URL (add) or name (remove)")
+    pl.set_defaults(func=cmd_plugin)
+
+    se = sub.add_parser("sessions", help="List saved sessions (dashboard)")
+    se.add_argument("--all", action="store_true", help="All workspaces, not just this one")
+    se.set_defaults(func=cmd_sessions)
     return p
 
 

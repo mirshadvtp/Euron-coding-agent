@@ -17,7 +17,8 @@ from pathlib import Path
 from collections import Counter
 
 from . import events as ev
-from . import gitignore, history, memory, pricing, skills as skills_mod
+from . import gitignore, memory, pricing, sessions
+from . import skills as skills_mod
 from .checkpoints import Checkpointer
 from .config import Config
 from .context import compact_history, expand_mentions
@@ -67,6 +68,7 @@ class AgentSession:
         persist: bool = False,
         plan_mode: bool = False,
         depth: int = 0,
+        session_id: str | None = None,
     ):
         self.workspace = workspace
         self.config = config
@@ -88,7 +90,13 @@ class AgentSession:
         self.plan_mode = plan_mode
         self.depth = depth
         self.todos: list = []
-        self.mcp = MCPManager(config.mcp_servers if depth == 0 else {})
+        if depth == 0:
+            from . import plugins as _plugins
+
+            mcp_servers = {**_plugins.plugin_mcp_servers(), **config.mcp_servers}
+        else:
+            mcp_servers = {}
+        self.mcp = MCPManager(mcp_servers)
         self.permissions = Permissions.from_config(
             config.permissions,
             auto_writes=config.agent.auto_approve_writes,
@@ -96,7 +104,11 @@ class AgentSession:
         )
         self.hooks = HookRunner(config.hooks, workspace)
         self._cancelled = False
-        self.messages: list[dict] = history.load_history(workspace) if persist else []
+        self.session_id = None
+        self.messages: list[dict] = []
+        if persist:
+            self.session_id = session_id or sessions.latest_id(workspace) or sessions.new_id()
+            self.messages = sessions.load(self.session_id)
 
     # ------------------------------------------------------------------ #
     def cancel(self) -> None:
@@ -163,8 +175,8 @@ class AgentSession:
         finally:
             if self.hooks.active:
                 await asyncio.to_thread(self.hooks.run, "Stop", {})
-            if self.persist:
-                history.save_history(self.workspace, self.messages)
+            if self.persist and self.session_id:
+                sessions.save(self.session_id, self.workspace, self.messages)
 
     async def _agent_loop(self) -> None:
         for step in range(self.config.agent.max_steps):

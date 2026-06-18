@@ -218,6 +218,21 @@
       case 'cancelled':
         add('status', '■ cancelled');
         break;
+      case 'diagnostics': {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg approval';
+        const span = document.createElement('span');
+        span.textContent = '⚠ ' + ev.count + ' problem(s) in changed files. ';
+        const b = document.createElement('button');
+        b.textContent = 'Fix them';
+        b.className = 'approve';
+        b.addEventListener('click', () => { vscode.postMessage({ command: 'runFix' }); b.disabled = true; });
+        wrap.appendChild(span);
+        wrap.appendChild(b);
+        log.appendChild(wrap);
+        scroll();
+        break;
+      }
       case 'error':
         add('error', '⚠ ' + escapeHtml(ev.message));
         break;

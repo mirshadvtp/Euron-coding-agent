@@ -463,6 +463,26 @@ def worktree_remove(ctx: ToolContext, name: str) -> ToolOutcome:
 
 
 # --------------------------------------------------------------------------- #
+# CI / PR helpers
+# --------------------------------------------------------------------------- #
+def git_branch(ctx: ToolContext, name: str) -> ToolOutcome:
+    return run_command(ctx, f"git checkout -b {name}")
+
+
+def git_push(ctx: ToolContext, branch: str = "") -> ToolOutcome:
+    target = branch or "HEAD"
+    return run_command(ctx, f"git push -u origin {target}")
+
+
+def open_pr(ctx: ToolContext, title: str, body: str = "") -> ToolOutcome:
+    if not shutil.which("gh"):
+        return ToolOutcome("GitHub CLI (gh) not found — install it to open PRs.", ok=False)
+    safe_t = title.replace('"', '\\"')
+    safe_b = body.replace('"', '\\"')
+    return run_command(ctx, f'gh pr create --title "{safe_t}" --body "{safe_b}"')
+
+
+# --------------------------------------------------------------------------- #
 # Dispatch table
 # --------------------------------------------------------------------------- #
 TOOL_FUNCS = {
@@ -488,6 +508,9 @@ TOOL_FUNCS = {
     "worktree_add": worktree_add,
     "worktree_list": worktree_list,
     "worktree_remove": worktree_remove,
+    "git_branch": git_branch,
+    "git_push": git_push,
+    "open_pr": open_pr,
 }
 
 
