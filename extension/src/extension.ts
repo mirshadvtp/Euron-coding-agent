@@ -35,6 +35,7 @@ const KEY_MODEL = 'euronAgent.customModel';
 const KEY_AUTOAPPROVE = 'euronAgent.autoApprove';
 const KEY_WORKSPACE = 'euronAgent.workspace';
 const KEY_PLAN = 'euronAgent.planMode';
+const KEY_DANGEROUS = 'euronAgent.dangerous';
 const secretKeyFor = (provider: string) => `euronAgent.apiKey:${provider}`;
 
 function providerMeta(id: string): ProviderMeta {
@@ -74,6 +75,20 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage(
         `Euron Agent plan mode: ${!cur ? 'ON (next task plans first)' : 'off'}`
       );
+    }),
+    vscode.commands.registerCommand('euronAgent.toggleDangerous', async () => {
+      const cur = context.globalState.get<boolean>(KEY_DANGEROUS) || false;
+      if (!cur) {
+        const ok = await vscode.window.showWarningMessage(
+          'Enable DANGEROUS mode? The agent will run EVERYTHING (edits, commands, deletes) without asking for approval.',
+          { modal: true }, 'Enable'
+        );
+        if (ok !== 'Enable') {
+          return;
+        }
+      }
+      await context.globalState.update(KEY_DANGEROUS, !cur);
+      vscode.window.showInformationMessage(`Euron Agent DANGEROUS mode: ${!cur ? 'ON' : 'off'}`);
     }),
     vscode.commands.registerCommand('euronAgent.setModel', async () => {
       const cfg = vscode.workspace.getConfiguration('euronAgent');
@@ -255,6 +270,7 @@ async function buildInitPayload(
     auto_approve: context.globalState.get<boolean>(KEY_AUTOAPPROVE) || false,
     persist: cfg.get<boolean>('persistHistory') ?? true,
     plan_mode: context.globalState.get<boolean>(KEY_PLAN) || false,
+    dangerous: context.globalState.get<boolean>(KEY_DANGEROUS) || false,
     reasoning_effort: cfg.get<string>('effort') || undefined
   };
 }

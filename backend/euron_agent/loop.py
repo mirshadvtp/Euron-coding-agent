@@ -70,11 +70,13 @@ class AgentSession:
         depth: int = 0,
         session_id: str | None = None,
         team: str | None = None,
+        dangerous: bool = False,
     ):
         self.workspace = workspace
         self.config = config
         self.io = io
         self.team = team
+        self.dangerous = dangerous  # YOLO: never ask, run everything
         self.client = build_client(config.provider, config.agent)
         if team:
             from . import teams
@@ -289,8 +291,8 @@ class AgentSession:
 
         await self.io.emit(ev.tool_start(tc.id, tc.name, tc.arguments))
 
-        # Permission decision: allow / ask / deny.
-        decision = self.permissions.decide(tc.name, tc.arguments)
+        # Permission decision: allow / ask / deny. Dangerous mode allows everything.
+        decision = "allow" if self.dangerous else self.permissions.decide(tc.name, tc.arguments)
         if decision == "deny":
             msg = f"Denied by permission policy: {tc.name} is not allowed."
             await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))

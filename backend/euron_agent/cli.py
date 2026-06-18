@@ -209,8 +209,9 @@ async def _run_task(task: str, args) -> None:
             f"{cfg.provider.api_key_env}."
         )
         return
-    io = TerminalIO(auto_approve=args.yes)
-    await AgentSession(workspace, cfg, io).run(task)
+    dangerous = getattr(args, "dangerous", False)
+    io = TerminalIO(auto_approve=args.yes or dangerous)
+    await AgentSession(workspace, cfg, io, dangerous=dangerous).run(task)
 
 
 def cmd_run(args) -> None:
@@ -309,8 +310,70 @@ HELP = """[bold]commands[/bold]
   /undo              revert the file changes from the last task
   /reset             clear the conversation context
   /yes               toggle auto-approve for edits & commands
+  /dangerous         toggle DANGEROUS mode (run everything, never ask)
   /help              show this help (Ctrl+C during a task = stop)
   /exit              quit"""
+
+
+# (name, description) for every built-in slash command - powers /help and the
+# "/" autocomplete popup.
+SLASH_COMMANDS = [
+    ("provider", "switch provider"),
+    ("key", "set API key"),
+    ("model", "set the model"),
+    ("baseurl", "set a custom base URL"),
+    ("config", "show current settings"),
+    ("providers", "list known providers"),
+    ("plan", "plan mode for the next task"),
+    ("review", "review the current git changes"),
+    ("compact", "summarize the conversation"),
+    ("init", "create AGENTS.md memory"),
+    ("skills", "list available skills"),
+    ("search", "search past sessions"),
+    ("usage", "tokens, cost, tool usage"),
+    ("effort", "reasoning effort low|medium|high"),
+    ("undo", "revert the last task's changes"),
+    ("reset", "clear the conversation context"),
+    ("yes", "toggle auto-approve"),
+    ("dangerous", "toggle DANGEROUS mode (no prompts)"),
+    ("help", "show help"),
+    ("exit", "quit"),
+]
+
+
+def _build_prompt_session(workspace: str):
+    """A prompt_toolkit session whose completer pops up all slash commands the
+    moment you type '/'. Returns None if prompt_toolkit isn't available or stdin
+    isn't an interactive terminal (e.g. piped input)."""
+    try:
+        if not sys.stdin.isatty():
+            return None
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import Completer, Completion
+    except Exception:
+        return None
+
+    cmds = list(SLASH_COMMANDS)
+    try:
+        from .commands import load_commands
+
+        for name in load_commands(workspace):
+            cmds.append((name, "custom command"))
+    except Exception:
+        pass
+
+    class _SlashCompleter(Completer):
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            if not text.startswith("/"):
+                return
+            word = text[1:].lower()
+            for name, desc in cmds:
+                if name.lower().startswith(word):
+                    yield Completion("/" + name, start_position=-len(text),
+                                     display="/" + name, display_meta=desc)
+
+    return PromptSession(completer=_SlashCompleter(), complete_while_typing=True)
 
 
 def _print_providers() -> None:
@@ -379,6 +442,14 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
     elif cmd == "/yes":
         io.auto_approve = not io.auto_approve
         console.print(f"[dim]auto-approve = {io.auto_approve}[/dim]")
+    elif cmd in ("/dangerous", "/yolo"):
+        session.dangerous = not session.dangerous
+        io.auto_approve = session.dangerous or io.auto_approve
+        if session.dangerous:
+            console.print("[bold red]DANGEROUS MODE ON[/bold red] - the agent will now run "
+                          "EVERYTHING (edits, commands, deletes) without asking. Use with care.")
+        else:
+            console.print("[green]dangerous mode OFF[/green] - approvals restored.")
     elif cmd == "/providers":
         _print_providers()
     elif cmd == "/config":
@@ -488,10 +559,16 @@ async def _chat(args) -> None:
     io = TerminalIO(auto_approve=getattr(args, "yes", False))
     sid = getattr(args, "session", None)
     team = getattr(args, "team_name", None)
+    dangerous = getattr(args, "dangerous", False)
     persist = bool(getattr(args, "resume", False) or sid)
-    session = AgentSession(workspace, cfg, io, persist=persist, session_id=sid, team=team)
+    session = AgentSession(workspace, cfg, io, persist=persist, session_id=sid,
+                           team=team, dangerous=dangerous)
+    if dangerous:
+        io.auto_approve = True
     if team:
         console.print(f"[magenta]team mode:[/magenta] coordinating '{team}' (state persists)")
+    if dangerous:
+        console.print("[bold red]DANGEROUS MODE ON[/bold red] - the agent will run everything without asking.")
     console.print(
         Panel(
             f"Euron Agent · [bold]{cfg.provider.name}[/bold] / {cfg.provider.model}\n"
@@ -506,9 +583,16 @@ async def _chat(args) -> None:
             "Set one with [bold]/key[/bold] (or switch with [bold]/provider[/bold])."
         )
 
+    ptk = _build_prompt_session(workspace)  # '/' autocomplete popup (if available)
+    if ptk is None:
+        console.print("[dim](tip: pip install prompt_toolkit for '/' command autocomplete)[/dim]")
+
     while True:
         try:
-            msg = await asyncio.to_thread(Prompt.ask, "[bold cyan]you[/bold cyan]")
+            if ptk is not None:
+                msg = await ptk.prompt_async("you ❯ ")
+            else:
+                msg = await asyncio.to_thread(Prompt.ask, "[bold cyan]you[/bold cyan]")
         except (EOFError, KeyboardInterrupt):
             break
         msg = msg.strip()
@@ -711,6 +795,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Override model id")
     p.add_argument("--workspace", default=os.getcwd(), help="Workspace root (default: cwd)")
     p.add_argument("--team-name", dest="team_name", help="Run as a coordinator for this named team")
+    p.add_argument("--dangerous", action="store_true",
+                   help="DANGEROUS: auto-run everything, never ask for approval (YOLO mode)")
     sub = p.add_subparsers(dest="command")
     sub.required = False  # bare `euron-agent` -> chat
 

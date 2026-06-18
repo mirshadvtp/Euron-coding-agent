@@ -2,7 +2,7 @@
   "name": "euron-agent",
   "displayName": "Euron Coding Agent",
   "description": "Lightweight agentic coding assistant (Cline/OpenCode-style). Plan, edit, and run code with approvals. Works with Euron/Euri, OpenAI, OpenRouter, Anthropic, Ollama, or any OpenAI-compatible/self-hosted model.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "Euron",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -107,6 +107,12 @@
         "icon": "$(checklist)"
       },
       {
+        "command": "euronAgent.toggleDangerous",
+        "title": "Toggle Dangerous Mode (no approvals)",
+        "category": "Euron Agent",
+        "icon": "$(flame)"
+      },
+      {
         "command": "euronAgent.selectWorkspace",
         "title": "Select Workspace Folder",
         "category": "Euron Agent",
@@ -164,9 +170,14 @@
           "group": "navigation@4"
         },
         {
-          "command": "euronAgent.restartBackend",
+          "command": "euronAgent.toggleDangerous",
           "when": "view == euronAgent.chat",
           "group": "navigation@5"
+        },
+        {
+          "command": "euronAgent.restartBackend",
+          "when": "view == euronAgent.chat",
+          "group": "navigation@6"
         }
       ]
     },

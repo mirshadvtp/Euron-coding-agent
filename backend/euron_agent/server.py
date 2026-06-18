@@ -31,7 +31,7 @@ from .config import Config, load_config
 from .events import AgentIO, ApprovalDecision
 from .loop import AgentSession
 
-app = FastAPI(title="Euron Agent", version="1.0.4")
+app = FastAPI(title="Euron Agent", version="1.0.5")
 app.state.token = None  # set by serve(); None disables auth (local dev/tests)
 
 
@@ -121,6 +121,7 @@ async def ws_endpoint(ws: WebSocket):
                     persist=bool(data.get("persist")),
                     plan_mode=bool(data.get("plan_mode")),
                     session_id=data.get("session_id"),
+                    dangerous=bool(data.get("dangerous")),
                 )
                 await ws.send_json(
                     ev.status(f"ready · {cfg.provider.name} · {cfg.provider.model}")

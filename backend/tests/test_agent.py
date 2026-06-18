@@ -796,6 +796,23 @@ def test_max_tokens_compat():
     assert calls["n"] == 1
 
 
+def test_dangerous_mode(tmp_path, monkeypatch):
+    import euron_agent.permissions as pm
+    monkeypatch.setattr(pm, "PERMISSIONS_FILE", tmp_path / "dp.json")
+    (tmp_path / "d.txt").write_text("x", encoding="utf-8")
+    cfg = load_config(provider="openai", api_key="x")
+    cfg.permissions = {"deny": ["delete_file(**)"]}  # even a deny rule is bypassed
+    io = CollectIO(approve=False)  # would reject if it were ever asked
+    sess = AgentSession(str(tmp_path), cfg, io, dangerous=True)
+    sess.client = ScriptedClient([
+        LLMResponse(content="", tool_calls=[ToolCall("1", "delete_file", {"path": "d.txt"})]),
+        LLMResponse(content="done", tool_calls=[]),
+    ])
+    run(sess.run("delete it"))
+    assert not (tmp_path / "d.txt").exists()  # ran despite deny + approve=False
+    assert not any(e["type"] == "approval_request" for e in io.events)  # never asked
+
+
 def test_team_mode(tmp_path, monkeypatch):
     import euron_agent.sessions as s
     monkeypatch.setattr(s, "SESSIONS_DIR", tmp_path / "sessions")
