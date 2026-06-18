@@ -716,7 +716,16 @@ def test_notify_dispatch(monkeypatch):
     import euron_agent.notify as nt
     monkeypatch.setattr(httpx, "post", lambda *a, **k: type("R", (), {"status_code": 200})())
     assert nt.send_slack("http://x", "hi")
+    assert nt.send_google_chat("http://g", "hi")
+    assert nt.send_whatsapp("sid", "tok", "+1", "+2", "hi")
+    assert nt.send_linear("key", "team", "hi")
     assert nt.dispatch({"slack_webhook": "http://x", "discord_webhook": "http://y"}, "hi") == ["slack", "discord"]
+    full = nt.dispatch({
+        "slack_webhook": "http://x", "google_chat_webhook": "http://g",
+        "twilio_sid": "s", "twilio_token": "t", "whatsapp_from": "+1", "whatsapp_to": "+2",
+        "linear_api_key": "k", "linear_team_id": "team",
+    }, "hi")
+    assert set(full) == {"slack", "google_chat", "whatsapp", "linear"}
     assert nt.dispatch({}, "hi") == []
 
 

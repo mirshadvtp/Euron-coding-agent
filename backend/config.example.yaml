@@ -133,6 +133,13 @@ notifications:
   discord_webhook: null       # https://discord.com/api/webhooks/...
   telegram_token: null        # bot token from @BotFather
   telegram_chat_id: null      # chat id to send to
+  google_chat_webhook: null   # Google Chat incoming webhook URL
+  twilio_sid: null            # WhatsApp via Twilio: Account SID
+  twilio_token: null          #                      Auth Token
+  whatsapp_from: null         #                      Twilio WhatsApp number (+1...)
+  whatsapp_to: null           #                      destination number (+1...)
+  linear_api_key: null        # Linear: create an issue with the result
+  linear_team_id: null        #         target team id
 
 # Files the agent must never read or write (globs, matched against rel path).
 ignore:

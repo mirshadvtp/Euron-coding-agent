@@ -12,7 +12,7 @@ A combination of the best ideas from Claude Code, Cursor, and Cline, built to ru
 [![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen.svg)](backend/tests)
 
 <!-- AUTOGEN:STATUS -->
-**Latest: v1.0.0** · 28 tools · 15 providers · 60 tests passing
+**Latest: v1.0.1** · 28 tools · 15 providers · 60 tests passing
 <!-- /AUTOGEN:STATUS -->
 
 </div>
