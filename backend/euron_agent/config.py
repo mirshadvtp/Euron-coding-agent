@@ -52,6 +52,8 @@ class AgentConfig:
     retry_backoff: float = 1.5
     # ignore .gitignore-listed paths in addition to the configured globs
     use_gitignore: bool = True
+    # auto-scaffold a .euron/ wrapper (memory + skill + project doc) on first run
+    auto_onboard: bool = True
     # extended thinking / reasoning (best-effort, provider-dependent)
     thinking: bool = False
     reasoning_effort: Optional[str] = None  # "low" | "medium" | "high"
@@ -271,6 +273,7 @@ def load_config(
         retry_attempts=int(agent_raw.get("retry_attempts", 3)),
         retry_backoff=float(agent_raw.get("retry_backoff", 1.5)),
         use_gitignore=bool(agent_raw.get("use_gitignore", True)),
+        auto_onboard=bool(agent_raw.get("auto_onboard", True)),
         thinking=bool(agent_raw.get("thinking", False)),
         reasoning_effort=agent_raw.get("reasoning_effort"),
         fallback_models=list(agent_raw.get("fallback_models", []) or []),

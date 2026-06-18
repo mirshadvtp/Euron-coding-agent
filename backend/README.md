@@ -57,8 +57,21 @@ In-chat commands: /provider /key /model /effort /plan /review /compact /init
 /skills /search /usage /undo /reset /yes /help /exit, plus any custom command in
 .euron/commands/.
 
+## What's new (1.0.8)
+
+- Auto-onboarding: the first time the agent works in a project it scaffolds a
+  `.euron/` wrapper - memory (AGENTS.md, pre-filled with the detected stack and
+  build/test commands), a project doc (PROJECT.md), and a starter skill - so it is
+  set up with zero effort. Re-run with `euron-agent onboard` or `/onboard`.
+- Live status line in the CLI (spinner, elapsed, live tokens + cost, tool and
+  sub-agent counters) and a completion summary of the steps taken.
+- Dangerous (YOLO) mode (`--dangerous` / `/dangerous`), `/` command autocomplete,
+  accurate per-model cost (with a `pricing:` override), and memory/context
+  optimization (bounded tool outputs + automatic compaction).
+
 ## Features
 
+- Auto-onboarding (.euron/ memory + skill + project doc, created automatically).
 - Agentic tool-calling loop: plan, read, search, edit, run, verify.
 - 28 sandboxed tools: read/write/edit/multi_edit/create/delete files, glob,
   search, run_command (streaming), background processes, git status/diff/commit/

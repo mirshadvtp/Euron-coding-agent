@@ -804,6 +804,27 @@ def test_max_tokens_compat():
     assert calls["n"] == 1
 
 
+def test_scaffold_onboard(tmp_path):
+    from euron_agent import scaffold
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"scripts":{"test":"jest","build":"tsc"}}', encoding="utf-8")
+    assert scaffold.needs_scaffold(str(tmp_path))
+    created = scaffold.scaffold(str(tmp_path))
+    assert any("AGENTS.md" in c for c in created)
+    assert any("PROJECT.md" in c for c in created)
+    assert any("SKILL.md" in c for c in created)
+    assert not scaffold.needs_scaffold(str(tmp_path))
+    info = scaffold.detect_project(str(tmp_path))
+    assert "Python" in info["stack"] and "Node.js" in info["stack"]
+    assert any("npm run test" in c for c in info["test"])
+    assert scaffold.scaffold(str(tmp_path)) == []  # idempotent
+    # the scaffolded skill + memory are picked up
+    from euron_agent.memory import load_memory
+    from euron_agent.skills import load_skills
+    assert "explore-codebase" in load_skills(str(tmp_path))
+    assert "Project memory" in load_memory(str(tmp_path))
+
+
 def test_dangerous_mode(tmp_path, monkeypatch):
     import euron_agent.permissions as pm
     monkeypatch.setattr(pm, "PERMISSIONS_FILE", tmp_path / "dp.json")

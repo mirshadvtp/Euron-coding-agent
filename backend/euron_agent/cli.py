@@ -444,6 +444,7 @@ HELP = """[bold]commands[/bold]
   /review            review the current git changes for bugs (like a code review)
   /compact           summarize the conversation to free up context
   /init              create an AGENTS.md project-memory file
+  /onboard           scaffold .euron/ (memory + skill + project doc) for this repo
   /skills            list available skills (.euron/skills/<name>/SKILL.md)
   /search <text>     search your past sessions
   /usage             show tokens, cost, and tool usage this session
@@ -469,6 +470,7 @@ SLASH_COMMANDS = [
     ("review", "review the current git changes"),
     ("compact", "summarize the conversation"),
     ("init", "create AGENTS.md memory"),
+    ("onboard", "scaffold .euron/ memory + skill + project doc"),
     ("skills", "list available skills"),
     ("search", "search past sessions"),
     ("usage", "tokens, cost, tool usage"),
@@ -648,6 +650,17 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
 
         p = write_template(session.workspace)
         console.print(f"[green]wrote {p.name}[/green] — edit it with project instructions.")
+    elif cmd == "/onboard":
+        from . import scaffold
+        from .skills import load_skills
+
+        created = scaffold.scaffold(session.workspace)
+        session.skills = load_skills(session.workspace)
+        if session.messages and session.messages[0].get("role") == "system":
+            session.messages.pop(0)  # rebuild system prompt (picks up new memory/skill)
+        console.print(
+            "[green]onboarded[/green] — created " + (", ".join(created) if created else "(already set up)")
+        )
     elif cmd == "/usage":
         from . import pricing
 
@@ -717,6 +730,23 @@ async def _chat(args) -> None:
                            team=team, dangerous=dangerous)
     if dangerous:
         io.auto_approve = True
+
+    # Auto-onboard: scaffold .euron/ (memory + skill + project doc) on first run.
+    if (cfg.agent.auto_onboard and not getattr(args, "no_onboard", False)
+            and not getattr(args, "resume", False)):
+        from . import scaffold
+        from .skills import load_skills
+
+        if scaffold.needs_scaffold(workspace):
+            created = scaffold.scaffold(workspace)
+            if created:
+                session.skills = load_skills(workspace)
+                console.print(
+                    f"[green]✦ Onboarded this project[/green] [dim](created {len(created)} "
+                    f"files under .euron/: memory, project doc, a skill - edit "
+                    f".euron/AGENTS.md to guide me)[/dim]"
+                )
+
     if team:
         console.print(f"[magenta]team mode:[/magenta] coordinating '{team}' (state persists)")
     if dangerous:
@@ -811,6 +841,20 @@ def cmd_serve(args) -> None:
 
 def cmd_providers(args) -> None:
     _print_providers()
+
+
+def cmd_onboard(args) -> None:
+    from . import scaffold
+
+    ws = str(Path(args.workspace).resolve())
+    created = scaffold.scaffold(ws)
+    if created:
+        console.print("[green]Onboarded.[/green] Created under .euron/:")
+        for c in created:
+            console.print(f"  [dim]{c}[/dim]")
+        console.print("[dim]Edit .euron/AGENTS.md to give the agent project memory/rules.[/dim]")
+    else:
+        console.print("[dim].euron is already set up.[/dim]")
 
 
 def cmd_update(args) -> None:
@@ -952,6 +996,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--team-name", dest="team_name", help="Run as a coordinator for this named team")
     p.add_argument("--dangerous", action="store_true",
                    help="DANGEROUS: auto-run everything, never ask for approval (YOLO mode)")
+    p.add_argument("--no-onboard", dest="no_onboard", action="store_true",
+                   help="Do not auto-scaffold a .euron/ wrapper on first run")
     sub = p.add_subparsers(dest="command")
     sub.required = False  # bare `euron-agent` -> chat
 
@@ -979,6 +1025,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(func=cmd_init)
     sub.add_parser("update", help="Update euron-coding-agent to the latest version").set_defaults(func=cmd_update)
     sub.add_parser("version", help="Show the installed version").set_defaults(func=cmd_version)
+    sub.add_parser("onboard", help="Scaffold .euron/ (memory + skill + project doc)").set_defaults(func=cmd_onboard)
 
     pl = sub.add_parser("plugin", help="Manage plugins (skills/commands/MCP bundles)")
     pl.add_argument("action", choices=["add", "list", "remove"])

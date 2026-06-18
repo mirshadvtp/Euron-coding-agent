@@ -31,7 +31,7 @@ from .config import Config, load_config
 from .events import AgentIO, ApprovalDecision
 from .loop import AgentSession
 
-app = FastAPI(title="Euron Agent", version="1.0.7")
+app = FastAPI(title="Euron Agent", version="1.0.8")
 app.state.token = None  # set by serve(); None disables auth (local dev/tests)
 
 
@@ -126,6 +126,27 @@ async def ws_endpoint(ws: WebSocket):
                 await ws.send_json(
                     ev.status(f"ready · {cfg.provider.name} · {cfg.provider.model}")
                 )
+                if cfg.agent.auto_onboard and not data.get("no_onboard"):
+                    from . import scaffold
+                    from .skills import load_skills
+
+                    if scaffold.needs_scaffold(data["workspace_path"]):
+                        created = scaffold.scaffold(data["workspace_path"])
+                        if created:
+                            session.skills = load_skills(data["workspace_path"])
+                            await ws.send_json(ev.info(
+                                f"Onboarded this project — created {len(created)} files "
+                                "under .euron/ (memory, project doc, a skill)."))
+
+            elif kind == "onboard":
+                if session:
+                    from . import scaffold
+                    from .skills import load_skills
+
+                    created = scaffold.scaffold(session.workspace)
+                    session.skills = load_skills(session.workspace)
+                    await ws.send_json(ev.info(
+                        "Onboarded: " + (", ".join(created) if created else "already set up")))
 
             elif kind == "run":
                 if session is None:

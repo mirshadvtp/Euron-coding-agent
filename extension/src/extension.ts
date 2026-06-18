@@ -132,6 +132,10 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showTextDocument(uri);
       }
     }),
+    vscode.commands.registerCommand('euronAgent.onboard', () => {
+      vscode.commands.executeCommand('workbench.view.extension.euronAgent');
+      provider.onboard();
+    }),
     vscode.commands.registerCommand('euronAgent.review', async () => {
       await vscode.commands.executeCommand('workbench.view.extension.euronAgent');
       provider.runText(
@@ -502,6 +506,21 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
   async runText(text: string) {
     await this.runTask(text);
+  }
+
+  async onboard() {
+    const workspace = this.getWorkspace();
+    if (!workspace) {
+      this.post({ type: 'error', message: 'Open a folder/workspace first.' });
+      return;
+    }
+    const init = await buildInitPayload(this.context, workspace);
+    if (!init || !(await this.ensureConnected())) {
+      return;
+    }
+    init.token = this.backend.token;
+    this.send(init);
+    this.send({ type: 'onboard' });
   }
 
   constructor(

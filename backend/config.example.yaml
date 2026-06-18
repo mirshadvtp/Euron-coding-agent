@@ -73,6 +73,7 @@ agent:
   auto_approve_commands: false
   max_file_bytes: 120000     # don't feed files larger than this to the model
   max_command_seconds: 60
+  auto_onboard: true         # scaffold .euron/ (memory + skill + project doc) on first run
   thinking: false            # enable provider-native extended thinking (Anthropic)
   reasoning_effort: null     # low|medium|high — for OpenAI o-series/reasoning models
   fallback_models: []        # try these (same provider) in order if the primary fails

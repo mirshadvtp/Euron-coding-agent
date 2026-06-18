@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.8
+
+- Auto-onboarding: scaffolds a `.euron/` wrapper (memory AGENTS.md, PROJECT.md,
+  and an explore-codebase skill) automatically on first run, pre-filled with the
+  detected stack and build/test/lint commands. Re-run via `euron-agent onboard`,
+  `/onboard`, or the "Onboard Project" command. Disable with `--no-onboard` /
+  `agent.auto_onboard: false`.
+
 ## 1.0.7
 
 - Live status line (CLI): spinner, rotating verb, elapsed time, live token count

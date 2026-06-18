@@ -12,12 +12,18 @@ anywhere, with any model, fully self-hostable.
 [![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen.svg)](backend/tests)
 
 <!-- AUTOGEN:STATUS -->
-**Latest: v1.0.7** · 28 tools · 15 providers · 62 tests passing
+**Latest: v1.0.8** · 28 tools · 15 providers · 63 tests passing
 <!-- /AUTOGEN:STATUS -->
 
 </div>
 
 ---
+
+> **New in 1.0.8** - Auto-onboarding: the agent scaffolds its own `.euron/` memory,
+> a skill, and a project doc the first time it works in a repo (zero setup). Plus a
+> live status line + completion summary, dangerous (YOLO) mode, `/` command
+> autocomplete, accurate per-model cost, and memory/context optimization. See the
+> [changelog](extension/CHANGELOG.md).
 
 ## What is it?
 
@@ -135,6 +141,19 @@ command you drop in `.euron/commands/`.
 ---
 
 ## Features in depth
+
+### Auto-onboarding (zero setup)
+The first time you run the agent in a project, it scaffolds a `.euron/` wrapper
+automatically - no commands, nothing to remember:
+- `.euron/AGENTS.md` - project memory/rules, pre-filled with the detected stack
+  and build/test/lint commands (auto-loaded into context every run).
+- `.euron/PROJECT.md` - a project overview the agent maintains as it learns.
+- `.euron/skills/explore-codebase/SKILL.md` - a starter skill for understanding
+  and safely changing the repo.
+
+It detects Python, Node, Go, Rust, Java/Gradle, Ruby, PHP, and more. Re-run any
+time with `euron-agent onboard` (CLI), `/onboard` (chat), or "Onboard Project"
+(extension). Disable with `--no-onboard` or `agent.auto_onboard: false`.
 
 ### Agentic loop and tools
 Native tool-calling loop. 28 tools: `read_file`, `write_file`, `edit_file`,
@@ -276,6 +295,19 @@ Tag a release and CI publishes everything; see [PUBLISHING.md](PUBLISHING.md) an
 ```bash
 git tag v1.0.2 && git push origin v1.0.2     # PyPI + Marketplace + Open VSX
 ```
+
+## Roadmap / ideas
+
+Ideas to make the CLI experience even better (contributions welcome):
+- Syntax-highlighted diffs and markdown in the terminal; a split diff view.
+- `@file` path autocomplete in chat (alongside the `/` command popup).
+- A TUI dashboard (sessions, running schedules, teams) in one screen.
+- Cost budgets and alerts ("stop at $1"), and a per-session cost ceiling.
+- Session branching / forking and a richer transcript search.
+- Inline edit acceptance ("accept/reject this hunk") during approvals.
+- Themes and an output-style picker; a status line you can customize.
+- Voice input and spoken summaries; desktop notifications on completion.
+- A `doctor` command that checks Python, keys, providers, and MCP servers.
 
 ## Contributing
 
