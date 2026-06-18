@@ -50,24 +50,54 @@ file is required - just pick a provider and supply a key.
     euron-agent schedule create "<name>" --cron "0 9 * * MON-FRI" --prompt "<task>"
     euron-agent schedule list | run <id> | remove <id> | daemon
     euron-agent plugin add <dir|zip-url> | list | remove <name>
+    euron-agent security            run a security audit of the codebase
+    euron-agent scan                fast secret + dependency vulnerability scan
+    euron-agent secfix              autonomous security remediation (audit→fix→verify)
+    euron-agent test [--all]        write + run tests (--all = whole-project suite)
+    euron-agent doctor              environment self-check
+    euron-agent audit [--lines N]   show & verify the tamper-evident action log
+    euron-agent init-ci             scaffold a GitHub Actions workflow
     euron-agent sessions            list saved sessions (dashboard)
     euron-agent chat --session <id> | --resume   resume a past session
 
-In-chat commands: /provider /key /model /effort /plan /review /compact /init
-/skills /search /usage /undo /reset /yes /help /exit, plus any custom command in
-.euron/commands/.
+In-chat commands: /provider /key /model /effort /plan /execute /review /security
+/scan /secfix /test /testall /audit /doctor /compact /init /skills /search /usage
+/undo /reset /yes /help /exit, plus any custom command in .euron/commands/.
 
-## What's new (1.0.8)
+## What's new (1.2.0)
 
-- Auto-onboarding: the first time the agent works in a project it scaffolds a
-  `.euron/` wrapper - memory (AGENTS.md, pre-filled with the detected stack and
-  build/test commands), a project doc (PROJECT.md), and a starter skill - so it is
-  set up with zero effort. Re-run with `euron-agent onboard` or `/onboard`.
-- Live status line in the CLI (spinner, elapsed, live tokens + cost, tool and
-  sub-agent counters) and a completion summary of the steps taken.
-- Dangerous (YOLO) mode (`--dangerous` / `/dangerous`), `/` command autocomplete,
-  accurate per-model cost (with a `pricing:` override), and memory/context
-  optimization (bounded tool outputs + automatic compaction).
+- **repo_map** tool: a compact symbol/outline map of the codebase so the agent
+  reads outlines first and full file bodies only on demand (token-saving).
+- **secret_scan** + **dependency_audit** tools, and **/scan** / **/secfix**
+  commands — find hard-coded credentials and vulnerable deps, then remediate in an
+  autonomous audit → fix → verify loop.
+- **Tamper-evident audit log** (`.euron/audit/`) — SHA-256 hash-chained record of
+  every action; `euron-agent audit` / `/audit` verifies the chain.
+- **Sandbox / egress policy** (`sandbox:`): deny-by-default command rules, allowlist,
+  and `block_network`, enforced before every shell command (even in dangerous mode).
+- **Agent-of-agent budgets** (`subagent_max_calls`, `subagent_token_budget`),
+  **model routing** (`router: {cheap, heavy}`), an opt-in **verifier** sub-agent
+  (`verify_edits`), and **self-heal** (`self_heal: N`).
+- **euron-agent doctor** (environment self-check), **init-ci** (GitHub Actions),
+  and **Anthropic prompt caching** of the static system prompt.
+
+## What's new (1.1.0)
+
+- Drag-and-drop context: reference or drop a **file, folder, or image** path into
+  chat and it is read and used automatically. Files of any reasonable length
+  (smart head+tail truncation), folders read recursively, and images sent as
+  multimodal blocks so vision models can actually see them. No special syntax -
+  quoted paths, absolute/relative paths, bare filenames, and `@mentions` all work.
+- Built-in **security audit** (`/security`, `euron-agent security`): vulnerability
+  review with severity-ranked findings and concrete fixes.
+- **Autonomous testing**: `/test [target]` writes and runs tests for a file/module;
+  `/testall` (or `euron-agent test --all`) builds and runs a comprehensive test
+  suite for the whole project and reports coverage gaps.
+- **Plan mode and execute mode**, switchable mid-session with `/plan` and
+  `/execute` (execute is the default).
+- Earlier: auto-onboarding (`.euron/` memory + skill + project doc), live status
+  line + completion summary, dangerous (YOLO) mode, `/` command autocomplete,
+  accurate per-model cost, and memory/context optimization.
 
 ## Features
 
@@ -76,7 +106,12 @@ In-chat commands: /provider /key /model /effort /plan /review /compact /init
 - 28 sandboxed tools: read/write/edit/multi_edit/create/delete files, glob,
   search, run_command (streaming), background processes, git status/diff/commit/
   branch/push, open_pr, git worktrees, web_search, web_fetch.
-- Plan mode, sub-agents, and multi-agent teams with persistent state.
+- Plan mode and execute mode, sub-agents, and multi-agent teams with persistent state.
+- Drag-and-drop context: read files (any length), whole folders, and images.
+- Token-friendly code intelligence: `repo_map` outline tool, model routing, prompt caching.
+- Security suite: `/security`, `/scan`, `/secfix`, secret_scan + dependency_audit tools.
+- Tamper-evident audit log + sandbox/egress policy; sub-agent budgets, verifier, self-heal.
+- Autonomous test writing/running (`/test`, `/testall`); `doctor` + `init-ci` helpers.
 - Scheduled agents on cron schedules (independent of any terminal).
 - MCP servers, plugins, skills, project memory (AGENTS.md), and custom commands.
 - Permissions (allow/ask/deny), hooks, approvals with diffs, checkpoints, undo.

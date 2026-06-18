@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from collections import Counter
 
 from . import events as ev
-from . import gitignore, memory, pricing, sessions
+from . import audit_log, gitignore, ingest, memory, pricing, sandbox, sessions
 from . import skills as skills_mod
 from .checkpoints import Checkpointer
 from .config import Config
@@ -73,6 +75,8 @@ class AgentSession:
         session_id: str | None = None,
         team: str | None = None,
         dangerous: bool = False,
+        audit: "audit_log.AuditLog | None" = None,
+        budget: dict | None = None,
     ):
         self.workspace = workspace
         self.config = config
@@ -80,6 +84,12 @@ class AgentSession:
         self.team = team
         self.dangerous = dangerous  # YOLO: never ask, run everything
         self.client = build_client(config.provider, config.agent)
+        # Tamper-evident audit trail (shared across nested sub-agents).
+        self.audit = audit or audit_log.AuditLog(workspace, enabled=config.agent.audit_log)
+        # Shared agent-of-agent budget (calls + tokens) across the whole tree.
+        self._budget = budget if budget is not None else {"calls": 0, "tokens": 0}
+        self._turn_mutated: set[str] = set()
+        self._heal_attempts: dict[str, int] = {}
         if team:
             from . import teams
 
@@ -128,6 +138,18 @@ class AgentSession:
     def undo(self) -> list[str]:
         return self.checkpointer.undo_last_turn()
 
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def _record_audit(self, tool: str, args: dict, decision: str,
+                      ok: bool | None, summary: str = "") -> None:
+        try:
+            self.audit.record(ts=self._now(), tool=tool, args=args, decision=decision,
+                              ok=ok, summary=summary, depth=self.depth)
+        except Exception:
+            pass
+
     def _system_content(self) -> str:
         tree = list_files(self.ctx).output
         base = system_prompt(self.workspace, tree)
@@ -164,6 +186,8 @@ class AgentSession:
                 await self.io.emit(ev.info(f"MCP unavailable: {e}"))
         self._ensure_system()
         self.checkpointer.begin_turn()
+        self._turn_mutated = set()
+        self._heal_attempts = {}
 
         if self.hooks.active:
             await asyncio.to_thread(self.hooks.run, "UserPromptSubmit", {"prompt": task})
@@ -171,9 +195,12 @@ class AgentSession:
         if self.plan_mode:
             task = "[PLAN MODE — research and propose a plan with update_plan; do NOT edit yet]\n" + task
         expanded = expand_mentions(task, self.ctx)
-        if images:
+        # Ingest any dropped/referenced files, folders, or images.
+        expanded, dropped_images = ingest.gather(expanded, self.ctx)
+        all_images = list(images or []) + dropped_images
+        if all_images:
             content = [{"type": "text", "text": expanded}] + [
-                {"type": "image_url", "image_url": {"url": u}} for u in images
+                {"type": "image_url", "image_url": {"url": u}} for u in all_images
             ]
         else:
             content = expanded
@@ -182,6 +209,7 @@ class AgentSession:
         status = "done"
         try:
             await self._agent_loop()
+            await self._maybe_verify_edits()
         except LLMError as e:
             status = "error"
             await self.io.emit(ev.error(f"LLM error: {e}"))
@@ -294,12 +322,26 @@ class AgentSession:
 
         await self.io.emit(ev.tool_start(tc.id, tc.name, tc.arguments))
 
+        # Sandbox / egress policy for shell commands — deny-by-default, pre-approval,
+        # enforced even in dangerous mode so autonomous runs stay contained.
+        if tc.name in ("run_command", "bash_background"):
+            allowed, reason = sandbox.check_command(
+                self.config.sandbox, tc.arguments.get("command", "")
+            )
+            if not allowed:
+                msg = f"Command blocked by sandbox policy: {reason}"
+                await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
+                self._append_tool_result(tc.id, msg)
+                self._record_audit(tc.name, tc.arguments, "sandbox-deny", False, reason)
+                return
+
         # Permission decision: allow / ask / deny. Dangerous mode allows everything.
         decision = "allow" if self.dangerous else self.permissions.decide(tc.name, tc.arguments)
         if decision == "deny":
             msg = f"Denied by permission policy: {tc.name} is not allowed."
             await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
             self._append_tool_result(tc.id, msg)
+            self._record_audit(tc.name, tc.arguments, "deny", False)
             return
         if decision == "ask":
             preview = (
@@ -315,6 +357,7 @@ class AgentSession:
                 msg = f"User REJECTED this action. Reason: {note}. Do not retry it as-is."
                 await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
                 self._append_tool_result(tc.id, msg)
+                self._record_audit(tc.name, tc.arguments, "reject", False, note)
                 return
             if ok.always:
                 self.permissions.add_always_allow(tc.name, tc.arguments)
@@ -341,6 +384,7 @@ class AgentSession:
         if tc.name in _FILE_MUTATORS and tc.arguments.get("path"):
             try:
                 self.checkpointer.record(self.ctx.resolve(tc.arguments["path"]))
+                self._turn_mutated.add(tc.arguments["path"])
             except Exception:
                 pass
 
@@ -357,7 +401,14 @@ class AgentSession:
         if outcome.diff:
             await self.io.emit(ev.diff(tc.arguments.get("path", ""), outcome.diff, outcome.is_new))
         await self.io.emit(ev.tool_result(tc.id, tc.name, outcome.ok, outcome.output))
-        self._append_tool_result(tc.id, outcome.output or "(no output)")
+        self._record_audit(tc.name, tc.arguments, "allow", outcome.ok,
+                           (outcome.output or "")[:200])
+
+        result_text = outcome.output or "(no output)"
+        heal = self._self_heal_note(tc, outcome)
+        if heal:
+            result_text += "\n\n" + heal
+        self._append_tool_result(tc.id, result_text)
 
         if self.hooks.active:
             await asyncio.to_thread(
@@ -411,24 +462,83 @@ class AgentSession:
         if self.depth >= _MAX_SUBAGENT_DEPTH:
             self._append_tool_result(tc.id, "Sub-agents cannot spawn more sub-agents.")
             return
+        # Agent-of-agent budget guard (shared across the whole sub-agent tree).
+        if self._budget["calls"] >= self.config.agent.subagent_max_calls:
+            self._append_tool_result(
+                tc.id, f"Sub-agent budget exhausted "
+                f"({self.config.agent.subagent_max_calls} calls). Do the work yourself.")
+            return
+        if self._budget["tokens"] >= self.config.agent.subagent_token_budget:
+            self._append_tool_result(
+                tc.id, "Sub-agent token budget exhausted. Finish without more sub-agents.")
+            return
+        self._budget["calls"] += 1
         self.subagent_calls += 1
         desc = tc.arguments.get("description", "sub-task")
         prompt = tc.arguments.get("prompt", "")
         await self.io.emit(ev.subagent_start(tc.id, desc))
 
-        sub_cfg = self.config
-        if self.config.subagent_model:
-            sub_cfg = replace(
-                self.config,
-                provider=replace(self.config.provider, model=self.config.subagent_model),
-            )
+        sub_cfg = self._cfg_with_model(self.config.router.get("cheap") or self.config.subagent_model)
         sub_io = _SubAgentIO(self.io)
-        sub = AgentSession(self.workspace, sub_cfg, sub_io, depth=self.depth + 1)
+        sub = AgentSession(self.workspace, sub_cfg, sub_io, depth=self.depth + 1,
+                           audit=self.audit, budget=self._budget)
         await sub.run(prompt)
         self.session_tokens += sub.session_tokens
+        self._budget["tokens"] += sub.session_tokens
         summary = sub_io.last_assistant or "(sub-agent produced no summary)"
         await self.io.emit(ev.subagent_end(tc.id, summary[:280]))
         self._append_tool_result(tc.id, f"Sub-agent '{desc}' result:\n{summary}")
+
+    def _cfg_with_model(self, model: str | None):
+        """Return self.config, optionally with the provider model swapped (routing)."""
+        if not model:
+            return self.config
+        return replace(self.config, provider=replace(self.config.provider, model=model))
+
+    def _self_heal_note(self, tc, outcome) -> str:
+        """When a test/build command fails and self_heal is on, nudge the agent to
+        diagnose and fix it, bounded by `agent.self_heal` attempts per command."""
+        limit = self.config.agent.self_heal
+        if limit <= 0 or outcome.ok or tc.name != "run_command":
+            return ""
+        cmd = tc.arguments.get("command", "")
+        if not re.search(r"(?i)\b(test|pytest|build|lint|tsc|mypy|cargo|gradle|jest|vitest)\b", cmd):
+            return ""
+        n = self._heal_attempts.get(cmd, 0) + 1
+        self._heal_attempts[cmd] = n
+        if n > limit:
+            return (f"[self-heal] Gave up after {limit} attempt(s) on `{cmd}`. "
+                    "Summarize the remaining failure for the user.")
+        return (f"[self-heal {n}/{limit}] This command FAILED. Diagnose the root cause, "
+                f"apply a fix, then re-run `{cmd}` to confirm it passes.")
+
+    async def _maybe_verify_edits(self) -> None:
+        """After a turn that changed files, optionally spawn a critic sub-agent that
+        adversarially reviews the diff before the user trusts it."""
+        if (not self.config.agent.verify_edits or self.depth != 0
+                or not self._turn_mutated):
+            return
+        if self._budget["calls"] >= self.config.agent.subagent_max_calls:
+            return
+        files = ", ".join(sorted(self._turn_mutated)[:20])
+        await self.io.emit(ev.info(f"verifying edits to: {files}"))
+        prompt = (
+            "You are a strict code reviewer. Review the changes just made to these "
+            f"files: {files}. Use git_diff (and read_file) to inspect them. Check: "
+            "does it compile/parse, does it match the apparent intent, did it break "
+            "anything, are there bugs, security issues, or missing tests? Reply with "
+            "a short verdict (APPROVE or NEEDS-WORK) and a bullet list of concrete "
+            "issues. Do NOT edit files."
+        )
+        self._budget["calls"] += 1
+        sub_io = _SubAgentIO(self.io)
+        sub_cfg = self._cfg_with_model(self.config.router.get("cheap") or self.config.subagent_model)
+        sub = AgentSession(self.workspace, sub_cfg, sub_io, depth=self.depth + 1,
+                           audit=self.audit, budget=self._budget)
+        await sub.run(prompt)
+        self.session_tokens += sub.session_tokens
+        verdict = sub_io.last_assistant or "(no verdict)"
+        await self.io.emit(ev.assistant_message("🔎 Verifier review:\n" + verdict))
 
     def _append_tool_result(self, call_id: str, content: str) -> None:
         # Bound very large tool outputs kept in context (keep head + tail).

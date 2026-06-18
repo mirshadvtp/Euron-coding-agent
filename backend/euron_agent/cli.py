@@ -48,8 +48,10 @@ _force_utf8()
 console = Console(legacy_windows=False)
 
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-_VERBS = ["Thinking", "Working", "Pondering", "Forging", "Composing",
-          "Reasoning", "Crafting", "Synthesizing", "Exploring"]
+_VERBS = ["Thinking", "Spelunking", "Pondering", "Forging", "Conjuring",
+          "Untangling", "Percolating", "Noodling", "Wrangling", "Marinating",
+          "Tinkering", "Synthesizing", "Composing", "Exploring", "Reasoning",
+          "Architecting", "Hatching", "Brewing", "Sculpting", "Decoding"]
 
 
 # --------------------------------------------------------------------------- #
@@ -441,7 +443,15 @@ HELP = """[bold]commands[/bold]
   /config            show current provider, model, base URL, key status
   /providers         list known providers
   /plan              plan mode for the next task (research → approve → execute)
+  /execute           execute mode — carry out the next task directly (default)
   /review            review the current git changes for bugs (like a code review)
+  /security          full security audit of the codebase
+  /scan              fast secret + dependency vulnerability scan
+  /secfix            autonomous security remediation (audit → fix → verify)
+  /test [target]     write tests for the code and run them
+  /testall           build & run a comprehensive test suite for the whole project
+  /audit             show & verify the tamper-evident action audit log
+  /doctor            run an environment self-check
   /compact           summarize the conversation to free up context
   /init              create an AGENTS.md project-memory file
   /onboard           scaffold .euron/ (memory + skill + project doc) for this repo
@@ -467,6 +477,7 @@ SLASH_COMMANDS = [
     ("config", "show current settings"),
     ("providers", "list known providers"),
     ("plan", "plan mode for the next task"),
+    ("execute", "execute mode — carry out the next task directly"),
     ("review", "review the current git changes"),
     ("compact", "summarize the conversation"),
     ("init", "create AGENTS.md memory"),
@@ -479,9 +490,57 @@ SLASH_COMMANDS = [
     ("reset", "clear the conversation context"),
     ("yes", "toggle auto-approve"),
     ("dangerous", "toggle DANGEROUS mode (no prompts)"),
+    ("security", "security audit of the code"),
+    ("scan", "fast secret + dependency scan"),
+    ("secfix", "autonomous security remediation"),
+    ("test", "write + run tests for the code"),
+    ("testall", "build & run a full test suite"),
+    ("audit", "show & verify the action audit log"),
+    ("doctor", "environment self-check"),
     ("help", "show help"),
     ("exit", "quit"),
 ]
+
+SECURITY_PROMPT = (
+    "Perform a thorough SECURITY REVIEW of this codebase. Use search_text and "
+    "read_file to inspect the real code. Look for: injection (SQL/command/XSS/"
+    "template), broken auth/authorization, secrets or credentials committed in "
+    "code, insecure deserialization, path traversal, SSRF, unsafe eval/exec, weak "
+    "or misused crypto, missing input validation, insecure defaults, vulnerable or "
+    "outdated dependencies, and sensitive data exposure/logging. Report findings "
+    "prioritized by severity (critical/high/medium/low) with file:line, a short "
+    "explanation, and a concrete fix. Do NOT modify files unless asked."
+)
+TEST_PROMPT = (
+    "Write automated tests for the recent/changed code (or the module I name). "
+    "Detect the test framework from the project (pytest, jest/vitest, go test, "
+    "cargo test, etc.). Create well-structured tests covering happy paths, edge "
+    "cases, and error handling. Then RUN them and fix failures until they pass. "
+    "Use todo_write to track progress. Summarize what you added and the results."
+)
+TESTALL_PROMPT = (
+    "Build a comprehensive automated TEST SUITE for this entire project. Steps: "
+    "(1) detect the language(s) and test framework; (2) map modules and find which "
+    "are untested; (3) generate unit tests for each, plus a few key integration "
+    "tests; (4) run the full suite and iterate until it passes; (5) report what was "
+    "added, coverage gaps that remain, and the final results. Use todo_write to "
+    "plan and spawn_agent for independent modules where it speeds things up."
+)
+SCAN_PROMPT = (
+    "Run a fast risk scan of this repository: call secret_scan to find hard-coded "
+    "credentials and dependency_audit to find vulnerable dependencies. Summarize "
+    "every finding with severity and a one-line fix. Do NOT modify files."
+)
+SECFIX_PROMPT = (
+    "Autonomous security remediation loop. (1) AUDIT: run secret_scan and "
+    "dependency_audit and do a focused code review for injection, authz, SSRF, path "
+    "traversal, and unsafe eval/exec. (2) PLAN: list findings by severity with a fix "
+    "for each. (3) FIX: implement the fixes (move secrets to env, pin/upgrade deps, "
+    "validate input, etc.), highest severity first, asking approval for each change. "
+    "(4) VERIFY: re-run the scans and the test suite to confirm nothing broke and the "
+    "issue is gone. Use todo_write to track every finding through to resolution and "
+    "report a before/after summary."
+)
 
 
 def _build_prompt_session(workspace: str):
@@ -562,6 +621,9 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
     elif cmd == "/plan":
         session.plan_mode = True
         console.print("[magenta]plan mode ON[/magenta] — your next task will research & propose a plan first.")
+    elif cmd in ("/execute", "/exec", "/run"):
+        session.plan_mode = False
+        console.print("[green]execute mode ON[/green] — your next task will be carried out directly.")
     elif cmd == "/compact":
         from .context import summarize_history
 
@@ -713,6 +775,26 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
         return ("run:Review the current uncommitted git changes (call git_diff first) "
                 "for bugs, security issues, race conditions, and improvements. Give a "
                 "concise, prioritized findings list. Do NOT modify files unless asked.")
+    elif cmd == "/security":
+        return "run:" + SECURITY_PROMPT
+    elif cmd == "/test":
+        return "run:" + (rest and f"{TEST_PROMPT}\nTarget: {rest}" or TEST_PROMPT)
+    elif cmd == "/testall":
+        return "run:" + TESTALL_PROMPT
+    elif cmd == "/scan":
+        return "run:" + SCAN_PROMPT
+    elif cmd == "/secfix":
+        return "run:" + SECFIX_PROMPT
+    elif cmd == "/doctor":
+        from . import doctor
+
+        console.print(doctor.format_report(doctor.run_checks(session.config, session.workspace)))
+    elif cmd == "/audit":
+        from . import audit_log
+
+        intact, msg = audit_log.verify(session.workspace)
+        console.print(audit_log.tail(session.workspace, 25))
+        console.print(("[green]" if intact else "[red]") + msg + "[/]")
     else:
         return "unknown"
     return "handled"
@@ -841,6 +923,55 @@ def cmd_serve(args) -> None:
 
 def cmd_providers(args) -> None:
     _print_providers()
+
+
+def cmd_security(args) -> None:
+    asyncio.run(_run_task(SECURITY_PROMPT, args))
+
+
+def cmd_test(args) -> None:
+    prompt = TESTALL_PROMPT if getattr(args, "all", False) else TEST_PROMPT
+    asyncio.run(_run_task(prompt, args))
+
+
+def cmd_scan(args) -> None:
+    asyncio.run(_run_task(SCAN_PROMPT, args))
+
+
+def cmd_secfix(args) -> None:
+    asyncio.run(_run_task(SECFIX_PROMPT, args))
+
+
+def cmd_doctor(args) -> None:
+    from . import doctor
+
+    try:
+        cfg = resolve_config(args)
+    except Exception:
+        cfg = None
+    workspace = str(Path(getattr(args, "workspace", ".")).resolve())
+    console.print(doctor.format_report(doctor.run_checks(cfg, workspace)))
+
+
+def cmd_audit(args) -> None:
+    from . import audit_log
+
+    workspace = str(Path(getattr(args, "workspace", ".")).resolve())
+    console.print(audit_log.tail(workspace, getattr(args, "lines", 25)))
+    intact, msg = audit_log.verify(workspace)
+    console.print(("[green]" if intact else "[red]") + msg + "[/]")
+
+
+def cmd_init_ci(args) -> None:
+    from . import ci
+
+    workspace = str(Path(getattr(args, "workspace", ".")).resolve())
+    ok, where = ci.write_workflow(workspace, force=getattr(args, "force", False))
+    if ok:
+        console.print(f"[green]Wrote[/green] {where}")
+        console.print("[dim]Add your provider key as a repo secret, then commit it.[/dim]")
+    else:
+        console.print(f"[yellow]{where}[/yellow]")
 
 
 def cmd_onboard(args) -> None:
@@ -1026,6 +1157,33 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("update", help="Update euron-coding-agent to the latest version").set_defaults(func=cmd_update)
     sub.add_parser("version", help="Show the installed version").set_defaults(func=cmd_version)
     sub.add_parser("onboard", help="Scaffold .euron/ (memory + skill + project doc)").set_defaults(func=cmd_onboard)
+
+    sec = sub.add_parser("security", help="Run a security audit of the codebase")
+    sec.add_argument("--yes", "-y", action="store_true", help="Auto-approve all actions")
+    sec.set_defaults(func=cmd_security)
+
+    tst = sub.add_parser("test", help="Write and run tests for the code")
+    tst.add_argument("--all", action="store_true", help="Build a full test suite for the whole project")
+    tst.add_argument("--yes", "-y", action="store_true", help="Auto-approve all actions")
+    tst.set_defaults(func=cmd_test)
+
+    scn = sub.add_parser("scan", help="Fast secret + dependency vulnerability scan")
+    scn.add_argument("--yes", "-y", action="store_true", help="Auto-approve all actions")
+    scn.set_defaults(func=cmd_scan)
+
+    sfx = sub.add_parser("secfix", help="Autonomous security remediation (audit → fix → verify)")
+    sfx.add_argument("--yes", "-y", action="store_true", help="Auto-approve all actions")
+    sfx.set_defaults(func=cmd_secfix)
+
+    sub.add_parser("doctor", help="Run an environment self-check").set_defaults(func=cmd_doctor)
+
+    aud = sub.add_parser("audit", help="Show & verify the tamper-evident action audit log")
+    aud.add_argument("--lines", type=int, default=25, help="How many recent records to show")
+    aud.set_defaults(func=cmd_audit)
+
+    ici = sub.add_parser("init-ci", help="Write a GitHub Actions workflow for the agent")
+    ici.add_argument("--force", action="store_true", help="Overwrite an existing workflow")
+    ici.set_defaults(func=cmd_init_ci)
 
     pl = sub.add_parser("plugin", help="Manage plugins (skills/commands/MCP bundles)")
     pl.add_argument("action", choices=["add", "list", "remove"])

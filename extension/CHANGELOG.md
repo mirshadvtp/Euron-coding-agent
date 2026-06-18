@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.2.0
+
+Agent-of-agent, token-friendly, and security features:
+
+- **repo_map tool** — a compact symbol/outline map of the codebase (per-file
+  classes/functions/methods with line numbers). The agent reads outlines first and
+  `read_file`s only the ranges it needs, cutting token usage on large repos.
+- **secret_scan** and **dependency_audit** tools — find hard-coded credentials
+  (masked in output) and known-vulnerable dependencies (pip-audit / npm audit /
+  cargo audit / govulncheck).
+- **/scan** (fast secret + dep scan) and **/secfix** (autonomous audit → fix →
+  verify remediation loop) commands, plus `euron-agent scan` / `secfix`.
+- **Tamper-evident audit log** — every tool action is appended to
+  `.euron/audit/audit.log` as a SHA-256 hash-chained record. `/audit` or
+  `euron-agent audit` shows and cryptographically verifies it.
+- **Sandbox / egress policy** (`sandbox:` config) — deny-by-default command rules,
+  `block_network`, and an allowlist enforced before any shell command runs, even
+  in dangerous mode.
+- **Agent-of-agent budgets** — nested sub-agents share a call + token budget
+  (`subagent_max_calls`, `subagent_token_budget`) so recursive delegation can't run
+  away.
+- **Model routing / auto-downshift** (`router: {cheap, heavy}`) — sub-agents and the
+  verifier use the cheap model automatically.
+- **Verifier/critic agent** (`verify_edits: true`) — after a turn that changed
+  files, a reviewer sub-agent adversarially checks the diff and reports a verdict.
+- **Self-heal** (`self_heal: N`) — a failed test/build command nudges the agent to
+  diagnose, fix, and re-run, up to N attempts.
+- **euron-agent doctor** — environment self-check (Python, version, provider/key,
+  tools, writable dirs). Also `/doctor`.
+- **euron-agent init-ci** — scaffold a GitHub Actions workflow that runs the agent
+  to scan and review pull requests headlessly.
+- **Prompt caching** for Anthropic — the large static system prompt is marked
+  ephemeral so it is reused from cache instead of re-billed every step.
+
+## 1.1.0
+
+- Drag-and-drop context: reference or drop a **file, folder, or image** path into
+  chat and the agent reads and uses it automatically. Text files of any reasonable
+  length (smart head+tail truncation when huge), folders read recursively
+  (bounded), and images converted to multimodal blocks for vision models. Detects
+  quoted paths, absolute/workspace-relative paths, bare filenames, and `@mentions`.
+  Fixes images and dropped files/folders not being picked up.
+- Security audit: `/security` (and `euron-agent security`) reviews the code for
+  vulnerabilities (injection, authz, secrets, SSRF, path traversal, unsafe
+  deserialization, dependency risks) with severity-ranked findings and fixes.
+- Autonomous testing: `/test [target]` writes and runs tests for a file/module;
+  `/testall` (and `euron-agent test --all`) builds and runs a comprehensive test
+  suite for the whole project and reports coverage gaps.
+- Plan mode and execute mode are now both first-class and switchable mid-session
+  via `/plan` and `/execute` (execute is the default).
+- More playful live status verbs (Spelunking, Conjuring, Untangling, Percolating…).
+
 ## 1.0.8
 
 - Auto-onboarding: scaffolds a `.euron/` wrapper (memory AGENTS.md, PROJECT.md,

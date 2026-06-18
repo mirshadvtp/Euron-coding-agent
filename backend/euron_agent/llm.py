@@ -360,9 +360,18 @@ class AnthropicClient(_RetryMixin):
 
     def chat(self, messages, tools=None, stream_cb=None, stream=True) -> LLMResponse:
         system, conv = self._to_anthropic_messages(messages)
+        # Prompt caching: the system prompt (repo map, AGENTS.md, tool docs) is large
+        # and static across a turn — mark it ephemeral so Anthropic reuses it from
+        # cache instead of re-billing the full prefix every step.
+        system_field: Any = system
+        if system and len(system) > 2000:
+            system_field = [{
+                "type": "text", "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }]
         kwargs: dict[str, Any] = {
             "model": self.provider.model,
-            "system": system,
+            "system": system_field,
             "messages": conv,
             "max_tokens": self.provider.max_tokens,
             "temperature": self.provider.temperature,

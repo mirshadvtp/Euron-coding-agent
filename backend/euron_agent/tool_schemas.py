@@ -130,6 +130,32 @@ TOOL_SCHEMAS = [
         ["pattern"],
     ),
     _fn(
+        "repo_map",
+        "Get a compact symbol/outline map of the codebase (per-file classes, "
+        "functions, methods with line numbers). Read this FIRST to locate code "
+        "cheaply, then read_file only the ranges you need — saves tokens vs reading "
+        "whole files.",
+        {
+            "path": {"type": "string", "description": "Sub-path to map (default '.')."},
+            "lang": {"type": "string", "description": "Optional language filter: py|ts|js|go|rs|java|rb."},
+        },
+        [],
+    ),
+    _fn(
+        "secret_scan",
+        "Scan the workspace for hard-coded secrets/credentials (API keys, tokens, "
+        "private keys, connection strings). Returns masked path:line findings.",
+        {"path": {"type": "string", "description": "Sub-path to scan (default '.')."}},
+        [],
+    ),
+    _fn(
+        "dependency_audit",
+        "Audit project dependencies for known vulnerabilities using the ecosystem's "
+        "tool (pip-audit / npm audit / cargo audit / govulncheck) when installed.",
+        {},
+        [],
+    ),
+    _fn(
         "multi_edit",
         "Apply several exact search/replace edits to ONE file atomically (all or "
         "nothing). Each edit needs old_string (exact, unique unless replace_all) "
@@ -287,6 +313,9 @@ PLAN_MODE_TOOLS = {
     "read_file",
     "search_text",
     "glob",
+    "repo_map",
+    "secret_scan",
+    "dependency_audit",
     "web_search",
     "web_fetch",
     "process_list",

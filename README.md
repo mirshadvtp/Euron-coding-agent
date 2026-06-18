@@ -9,21 +9,25 @@ anywhere, with any model, fully self-hostable.
 [![PyPI](https://img.shields.io/pypi/v/euron-coding-agent.svg)](https://pypi.org/project/euron-coding-agent/)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://pypi.org/project/euron-coding-agent/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen.svg)](backend/tests)
+[![Tests](https://img.shields.io/badge/tests-74%20passing-brightgreen.svg)](backend/tests)
 
 <!-- AUTOGEN:STATUS -->
-**Latest: v1.0.8** · 28 tools · 15 providers · 63 tests passing
+**Latest: v1.2.0** · 31 tools · 15 providers · 74 tests passing
 <!-- /AUTOGEN:STATUS -->
 
 </div>
 
 ---
 
-> **New in 1.0.8** - Auto-onboarding: the agent scaffolds its own `.euron/` memory,
-> a skill, and a project doc the first time it works in a repo (zero setup). Plus a
-> live status line + completion summary, dangerous (YOLO) mode, `/` command
-> autocomplete, accurate per-model cost, and memory/context optimization. See the
-> [changelog](extension/CHANGELOG.md).
+> **New in 1.2.0** - Goes deeper on **agent-of-agent**, **token-saving**, and
+> **security**: a `repo_map` outline tool (read outlines, not whole files),
+> `secret_scan` + `dependency_audit`, an autonomous **`/secfix`** remediation loop, a
+> **tamper-evident audit log** (`/audit`), a **sandbox/egress policy**, nested
+> sub-agent **budgets** + **model routing**, an opt-in **verifier** + **self-heal**,
+> **`euron-agent doctor`**, **`init-ci`**, and Anthropic **prompt caching**.
+> 1.1.0 added drag-and-drop **file/folder/image** context, **plan + execute** modes,
+> and a **security audit** + autonomous testing (`/security`, `/test`, `/testall`).
+> See the [changelog](extension/CHANGELOG.md).
 
 ## What is it?
 
@@ -49,6 +53,13 @@ local with Ollama or LM Studio.
 | Scheduled agents | run tasks on cron (`schedule create --cron "0 9 * * MON-FRI"`) |
 | MCP, plugins, skills | unlimited tool and capability extensibility |
 | Rules, memory, commands | `AGENTS.md`, `.euron/skills`, `.euron/commands` |
+| Plan + execute modes | think first with `/plan`, then `/execute` to make changes |
+| Drag & drop context | drop a file, folder, or image path - it's read and used |
+| Token-friendly | `repo_map` outline tool + Anthropic prompt caching + model routing |
+| Security & testing | `/security`, `/scan`, `/secfix`, `/test`, `/testall`; secret + dep scanners |
+| Tamper-evident audit | hash-chained log of every action (`/audit` to verify) |
+| Sandbox / egress | deny-by-default command rules + network block, even in YOLO mode |
+| Agent-of-agent | nested sub-agents with shared call/token budgets + verifier + self-heal |
 | Approvals and permissions | allow/ask/deny rules, diffs, undo, cancel |
 | Notifications | Slack, Discord, Telegram, Google Chat, WhatsApp, Linear |
 | Multimodal | attach images to vision models |
@@ -134,9 +145,13 @@ euron-agent schedule daemon                   # fire due schedules
 euron-agent serve --host 0.0.0.0 --port 8000  # self-host (prints a bearer token)
 ```
 
-In-chat slash commands: `/provider /key /model /effort /plan /review /compact
-/init /skills /search /usage /undo /reset /yes /help /exit` - plus any custom
-command you drop in `.euron/commands/`.
+In-chat slash commands: `/provider /key /model /effort /plan /execute /review
+/security /scan /secfix /test /testall /audit /doctor /compact /init /skills /search
+/usage /undo /reset /yes /help /exit` - plus any custom command you drop in
+`.euron/commands/`.
+
+**Full command reference (every CLI subcommand and slash command, with
+descriptions): [docs/COMMANDS.md](docs/COMMANDS.md).**
 
 ---
 
@@ -163,9 +178,76 @@ Native tool-calling loop. 28 tools: `read_file`, `write_file`, `edit_file`,
 worktrees (`worktree_add/list/remove`), `web_search`, `web_fetch`, plus meta tools
 `todo_write`, `spawn_agent`, `update_plan`, `use_skill`. All workspace-sandboxed.
 
-### Plan mode
-Research read-only, propose a plan, you approve, then it executes (`/plan` or the
-extension toggle).
+### Plan mode and execute mode
+Two ways to run, switchable mid-session:
+- **Execute mode** (default) - the agent reads, edits, runs commands, and verifies
+  to get the task done, asking for approval per your permission rules.
+- **Plan mode** - read-only research; it proposes a step-by-step plan and waits for
+  your approval before changing anything. Toggle with `/plan`, return with
+  `/execute` (or the extension toggle).
+
+### Drag & drop context - files, folders, and images
+Reference or drag-and-drop a path into chat and the agent reads it automatically -
+no special syntax needed:
+- **Files** of any reasonable length (long files are smartly truncated head+tail).
+- **Folders** - read recursively (bounded), so "summarize `./src`" just works.
+- **Images** (`.png/.jpg/.gif/.webp/...`) - sent as multimodal blocks to vision
+  models so the agent can actually *see* the screenshot/diagram you dropped.
+
+Quoted paths (drag-drop with spaces), absolute or workspace-relative paths, bare
+filenames, and `@mentions` are all detected. You can still attach images explicitly
+in the extension.
+
+### Security audit & autonomous testing
+Built-in commands that turn the agent into a security reviewer and test engineer:
+- `/security` - audit the code for vulnerabilities (injection, authz, secrets,
+  unsafe deserialization, SSRF, path traversal, dependency risks) with severity-
+  ranked findings and concrete fixes.
+- `/scan` - fast pass: `secret_scan` (hard-coded credentials, masked in output) +
+  `dependency_audit` (pip-audit / npm audit / cargo audit / govulncheck).
+- `/secfix` - **autonomous remediation loop**: audit → plan → fix (highest severity
+  first, with approval) → re-scan and re-test to verify.
+- `/test [target]` - write meaningful tests for the given file/module and run them.
+- `/testall` - build and run a **complete test suite** across the project, then
+  report coverage gaps. Also `euron-agent security|scan|secfix|test [--all]` for
+  headless/CI use.
+
+### Token-friendly code intelligence
+- `repo_map` tool - a compact symbol/outline map (per-file classes, functions,
+  methods + line numbers, language-agnostic). The agent reads the map first to
+  locate code, then `read_file`s only the ranges it needs instead of whole files.
+- **Model routing / auto-downshift** (`router: {cheap, heavy}`) - sub-agents and the
+  verifier run on the cheap model automatically; reserve the premium model for the
+  main reasoning loop.
+- **Prompt caching** - on Anthropic, the large static system prompt is marked
+  ephemeral so it is served from cache instead of re-billed every step.
+
+### Agent-of-agent: budgets, verifier, self-heal
+- **Nested sub-agents** share a call + token budget across the whole tree
+  (`subagent_max_calls`, `subagent_token_budget`) so recursive delegation can't run
+  away.
+- **Verifier/critic** (`verify_edits: true`) - after a turn that changed files, a
+  reviewer sub-agent adversarially checks the diff and posts an APPROVE / NEEDS-WORK
+  verdict with concrete issues.
+- **Self-heal** (`self_heal: N`) - a failed test/build command nudges the agent to
+  diagnose, fix, and re-run, up to N attempts.
+
+### Audit log & sandbox (secure by default)
+- **Tamper-evident audit log** - every tool action is appended to
+  `.euron/audit/audit.log` as a SHA-256 hash-chained record. Run `/audit` (or
+  `euron-agent audit`) to view recent actions and cryptographically verify the chain
+  is intact - any edit/insert/delete is detected.
+- **Sandbox / egress policy** (`sandbox:` in config) - `deny_commands` (regex),
+  `allow_commands` (deny-by-default allowlist), and `block_network` are enforced
+  before any shell command runs - **even in dangerous/YOLO mode**, so autonomous
+  runs stay contained.
+
+### Doctor & CI
+- `euron-agent doctor` (or `/doctor`) - environment self-check: Python version,
+  installed version, active provider + key reachability, optional tools
+  (git/rg/gh/pip-audit), and writable data/workspace dirs, with fix hints.
+- `euron-agent init-ci` - scaffold `.github/workflows/euron-agent.yml` that runs the
+  agent headlessly to scan for secrets/vulnerable deps and review pull requests.
 
 ### Multi-agent teams
 A coordinator breaks work into subtasks and delegates to specialist sub-agents

@@ -804,6 +804,32 @@ def test_max_tokens_compat():
     assert calls["n"] == 1
 
 
+def test_ingest_files_folders_images(tmp_path):
+    from euron_agent import ingest
+    ctx = ctx_for(tmp_path)
+    (tmp_path / "data.txt").write_text("INGEST_ME_PLEASE", encoding="utf-8")
+    sub = tmp_path / "folder"
+    sub.mkdir()
+    (sub / "a.py").write_text("CODE_ALPHA", encoding="utf-8")
+    (tmp_path / "pic.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    # absolute file path in the message
+    text, imgs = ingest.gather(f"look at {tmp_path / 'data.txt'}", ctx)
+    assert "INGEST_ME_PLEASE" in text and imgs == []
+    # quoted folder (drag-drop with spaces style)
+    text2, _ = ingest.gather(f'summarize "{sub}"', ctx)
+    assert "CODE_ALPHA" in text2
+    # image -> multimodal data url
+    _t3, imgs3 = ingest.gather(str(tmp_path / "pic.png"), ctx)
+    assert imgs3 and imgs3[0].startswith("data:image")
+    # bare filename with extension that exists
+    text4, _ = ingest.gather("read data.txt", ctx)
+    assert "INGEST_ME_PLEASE" in text4
+    # a normal message with no paths is unchanged
+    text5, imgs5 = ingest.gather("just refactor the auth module", ctx)
+    assert text5 == "just refactor the auth module" and imgs5 == []
+
+
 def test_scaffold_onboard(tmp_path):
     from euron_agent import scaffold
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
@@ -853,3 +879,120 @@ def test_team_mode(tmp_path, monkeypatch):
     assert sess.session_id == "team-auth-sprint"
     # team coordinator instructions injected into the system prompt
     assert any("COORDINATOR" in (m.get("content") or "") for m in sess.messages if m.get("role") == "system")
+
+
+# --------------------------------------------------------------------------- #
+# v1.2.0 — code-intel, security, audit, sandbox, budget, doctor, ci
+# --------------------------------------------------------------------------- #
+def test_repo_map(tmp_path):
+    from euron_agent import repomap
+    ctx = ctx_for(tmp_path)
+    (tmp_path / "m.py").write_text(
+        "class Foo:\n    def bar(self):\n        pass\n\ndef top_level():\n    return 1\n",
+        encoding="utf-8")
+    out = repomap.build_map(ctx, ".")
+    assert "m.py" in out and "class Foo" in out and "def bar" in out and "def top_level" in out
+    # language filter excludes non-matching
+    assert "no recognizable" in repomap.build_map(ctx, ".", "go")
+
+
+def test_secret_scan(tmp_path):
+    from euron_agent import secrets
+    ctx = ctx_for(tmp_path)
+    (tmp_path / "ok.py").write_text("api_key = os.environ['X']\n", encoding="utf-8")
+    count, report = secrets.scan(ctx, ".")
+    assert count == 0
+    (tmp_path / "bad.py").write_text(
+        'GITHUB="ghp_' + "a" * 36 + '"\npassword = "hunter2hunter2"\n', encoding="utf-8")
+    count, report = secrets.scan(ctx, ".")
+    assert count >= 1 and "bad.py" in report
+    # full secret value is masked, not echoed
+    assert "ghp_" + "a" * 36 not in report
+
+
+def test_secret_scan_ignores_placeholders(tmp_path):
+    from euron_agent import secrets
+    ctx = ctx_for(tmp_path)
+    (tmp_path / "c.py").write_text('password = "your-password-here"\n', encoding="utf-8")
+    count, _ = secrets.scan(ctx, ".")
+    assert count == 0
+
+
+def test_dependency_audit_no_manifest(tmp_path):
+    from euron_agent import depaudit
+    ctx = ctx_for(tmp_path)
+    clean, report = depaudit.audit(ctx)
+    assert clean and "No recognized dependency manifest" in report
+
+
+def test_sandbox_policy():
+    from euron_agent import sandbox
+    assert sandbox.check_command({}, "rm -rf /tmp/x")[0] is True  # no policy
+    deny = {"deny_commands": [r"git push"]}
+    assert sandbox.check_command(deny, "git push origin main")[0] is False
+    net = {"block_network": True}
+    assert sandbox.check_command(net, "curl http://evil.com")[0] is False
+    assert sandbox.check_command(net, "pytest -q")[0] is True
+    allow = {"allow_commands": [r"^pytest"]}
+    assert sandbox.check_command(allow, "pytest -q")[0] is True
+    assert sandbox.check_command(allow, "rm file")[0] is False
+    assert sandbox.is_destructive("rm -rf /") is True
+
+
+def test_audit_log_chain(tmp_path):
+    from euron_agent import audit_log
+    log = audit_log.AuditLog(str(tmp_path), enabled=True)
+    log.record(ts="2026-01-01T00:00:00", tool="run_command",
+               args={"command": "ls"}, decision="allow", ok=True, summary="ok")
+    log.record(ts="2026-01-01T00:00:01", tool="write_file",
+               args={"path": "a", "content": "x" * 500}, decision="allow", ok=True)
+    intact, msg = audit_log.verify(str(tmp_path))
+    assert intact, msg
+    # Tamper with a record -> chain breaks.
+    p = tmp_path / ".euron" / "audit" / "audit.log"
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert "ls" in lines[0]
+    lines[0] = lines[0].replace("ls", "rm -rf /")  # only appears in the command arg
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    intact, msg = audit_log.verify(str(tmp_path))
+    assert not intact and ("tamper" in msg.lower() or "mismatch" in msg.lower())
+
+
+def test_doctor_checks(tmp_path):
+    from euron_agent import doctor
+    checks = doctor.run_checks(None, str(tmp_path))
+    assert any(c.name == "Python" for c in checks)
+    report = doctor.format_report(checks)
+    assert "environment check" in report.lower()
+
+
+def test_ci_workflow(tmp_path):
+    from euron_agent import ci
+    ok, where = ci.write_workflow(str(tmp_path))
+    assert ok and (tmp_path / ".github" / "workflows" / "euron-agent.yml").exists()
+    # idempotent without force
+    ok2, _ = ci.write_workflow(str(tmp_path))
+    assert not ok2
+
+
+def test_tools_repo_map_and_scan_registered():
+    from euron_agent.tools import TOOL_FUNCS
+    for name in ("repo_map", "secret_scan", "dependency_audit"):
+        assert name in TOOL_FUNCS
+
+
+def test_subagent_budget_blocks(tmp_path, monkeypatch):
+    # subagent_max_calls=0 means a spawn is refused, not executed.
+    cfg = load_config()
+    cfg.agent.subagent_max_calls = 0
+    io = CollectIO()
+    sess = AgentSession(str(tmp_path), cfg, io)
+
+    class _TC:
+        id = "x"
+        name = "spawn_agent"
+        arguments = {"description": "d", "prompt": "p"}
+
+    run(sess._spawn_agent(_TC()))
+    last = sess.messages[-1]
+    assert "budget exhausted" in last["content"]

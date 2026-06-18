@@ -54,6 +54,15 @@ class AgentConfig:
     use_gitignore: bool = True
     # auto-scaffold a .euron/ wrapper (memory + skill + project doc) on first run
     auto_onboard: bool = True
+    # tamper-evident append-only audit log of tool actions (.euron/audit/)
+    audit_log: bool = True
+    # post-edit verifier (critic) sub-agent that reviews the turn's diff
+    verify_edits: bool = False
+    # self-heal: auto-retry a failed test/command via a fix-it sub-agent (N times)
+    self_heal: int = 0
+    # nested sub-agent budgets (agent-of-agent guardrails)
+    subagent_max_calls: int = 12
+    subagent_token_budget: int = 400_000
     # extended thinking / reasoning (best-effort, provider-dependent)
     thinking: bool = False
     reasoning_effort: Optional[str] = None  # "low" | "medium" | "high"
@@ -74,6 +83,12 @@ class Config:
     hooks: dict = field(default_factory=dict)
     notifications: dict = field(default_factory=dict)
     pricing: dict = field(default_factory=dict)  # model -> {input, output} per 1M tokens
+    # model routing: {"cheap": "<model>", "heavy": "<model>"} — cheap is used for
+    # sub-agents / verifier / self-heal when set (auto-downshift).
+    router: dict = field(default_factory=dict)
+    # run_command sandbox/egress policy: deny_commands (regex), allow_commands
+    # (allowlist; if non-empty everything else is denied), block_network (bool).
+    sandbox: dict = field(default_factory=dict)
 
 
 DEFAULT_IGNORE = [
@@ -274,6 +289,11 @@ def load_config(
         retry_backoff=float(agent_raw.get("retry_backoff", 1.5)),
         use_gitignore=bool(agent_raw.get("use_gitignore", True)),
         auto_onboard=bool(agent_raw.get("auto_onboard", True)),
+        audit_log=bool(agent_raw.get("audit_log", True)),
+        verify_edits=bool(agent_raw.get("verify_edits", False)),
+        self_heal=int(agent_raw.get("self_heal", 0)),
+        subagent_max_calls=int(agent_raw.get("subagent_max_calls", 12)),
+        subagent_token_budget=int(agent_raw.get("subagent_token_budget", 400_000)),
         thinking=bool(agent_raw.get("thinking", False)),
         reasoning_effort=agent_raw.get("reasoning_effort"),
         fallback_models=list(agent_raw.get("fallback_models", []) or []),
@@ -311,4 +331,6 @@ def load_config(
         hooks=raw.get("hooks", {}) or {},
         notifications=raw.get("notifications", {}) or {},
         pricing=raw.get("pricing", {}) or {},
+        router=raw.get("router", {}) or {},
+        sandbox=raw.get("sandbox", {}) or {},
     )

@@ -197,6 +197,32 @@ def glob_files(ctx: ToolContext, pattern: str, path: str = ".") -> ToolOutcome:
 
 
 # --------------------------------------------------------------------------- #
+# Code intelligence / security (read-only)
+# --------------------------------------------------------------------------- #
+def repo_map(ctx: ToolContext, path: str = ".", lang: str = "") -> ToolOutcome:
+    """Compact symbol/outline map of the repo — read this before reading files."""
+    from . import repomap
+
+    return ToolOutcome(repomap.build_map(ctx, path, lang or None))
+
+
+def secret_scan(ctx: ToolContext, path: str = ".") -> ToolOutcome:
+    """Scan the workspace for hard-coded secrets/credentials."""
+    from . import secrets
+
+    count, report = secrets.scan(ctx, path)
+    return ToolOutcome(report, ok=(count == 0))
+
+
+def dependency_audit(ctx: ToolContext) -> ToolOutcome:
+    """Audit project dependencies for known vulnerabilities."""
+    from . import depaudit
+
+    clean, report = depaudit.audit(ctx)
+    return ToolOutcome(report, ok=clean)
+
+
+# --------------------------------------------------------------------------- #
 # Mutating tools (gated by approval in the loop)
 # --------------------------------------------------------------------------- #
 def _unified(path: str, before: str, after: str) -> str:
@@ -490,6 +516,9 @@ TOOL_FUNCS = {
     "read_file": read_file,
     "search_text": search_text,
     "glob": glob_files,
+    "repo_map": repo_map,
+    "secret_scan": secret_scan,
+    "dependency_audit": dependency_audit,
     "write_file": write_file,
     "edit_file": edit_file,
     "multi_edit": multi_edit,
