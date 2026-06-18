@@ -70,6 +70,7 @@ class Config:
     subagent_model: Optional[str] = None
     permissions: dict = field(default_factory=dict)
     hooks: dict = field(default_factory=dict)
+    notifications: dict = field(default_factory=dict)
 
 
 DEFAULT_IGNORE = [
@@ -112,7 +113,62 @@ BUILTIN_PROVIDERS: dict[str, dict] = {
         "api_key_env": "ANTHROPIC_API_KEY",
         "model": "claude-sonnet-4-6",
     },
+    "gemini": {
+        "type": "openai",  # Google's OpenAI-compatible endpoint
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key_env": "GEMINI_API_KEY",
+        "model": "gemini-2.0-flash",
+    },
+    "groq": {
+        "type": "openai",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "model": "llama-3.3-70b-versatile",
+    },
+    "cerebras": {
+        "type": "openai",
+        "base_url": "https://api.cerebras.ai/v1",
+        "api_key_env": "CEREBRAS_API_KEY",
+        "model": "llama-3.3-70b",
+    },
+    "deepseek": {
+        "type": "openai",
+        "base_url": "https://api.deepseek.com",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "model": "deepseek-chat",
+    },
+    "together": {
+        "type": "openai",
+        "base_url": "https://api.together.xyz/v1",
+        "api_key_env": "TOGETHER_API_KEY",
+        "model": "moonshotai/Kimi-K2-Instruct",
+    },
+    "mistral": {
+        "type": "openai",
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key_env": "MISTRAL_API_KEY",
+        "model": "mistral-large-latest",
+    },
+    "xai": {
+        "type": "openai",
+        "base_url": "https://api.x.ai/v1",
+        "api_key_env": "XAI_API_KEY",
+        "model": "grok-2-latest",
+    },
+    "vercel": {
+        "type": "openai",  # Vercel AI Gateway
+        "base_url": "https://ai-gateway.vercel.sh/v1",
+        "api_key_env": "AI_GATEWAY_API_KEY",
+        "model": "anthropic/claude-sonnet-4.5",
+    },
+    "lmstudio": {
+        "type": "openai",
+        "base_url": "http://localhost:1234/v1",
+        "api_key_env": None,
+        "model": "local-model",
+    },
     # Generic OpenAI-compatible endpoint; base_url/model supplied at runtime.
+    # Covers AWS Bedrock / Azure / GCP Vertex via an OpenAI-compatible proxy.
     "custom": {
         "type": "openai",
         "base_url": "http://localhost:8001/v1",
@@ -249,4 +305,5 @@ def load_config(
         subagent_model=raw.get("subagent_model"),
         permissions=raw.get("permissions", {}) or {},
         hooks=raw.get("hooks", {}) or {},
+        notifications=raw.get("notifications", {}) or {},
     )

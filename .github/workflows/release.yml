@@ -10,6 +10,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   publish-backend:
     name: Publish backend to PyPI
@@ -63,3 +66,29 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: extension/euron-agent.vsix
+          generate_release_notes: true
+
+  sync-readme:
+    name: Refresh README status & commit
+    runs-on: ubuntu-latest
+    needs: [publish-backend, publish-extension]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend (for introspection)
+        run: pip install -e backend
+      - name: Regenerate README status block
+        run: python scripts/update_readme_status.py
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet README.md; then
+            git add README.md
+            git commit -m "docs: refresh README status [skip ci]"
+            git push origin main
+          fi

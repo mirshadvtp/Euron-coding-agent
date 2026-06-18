@@ -1,154 +1,257 @@
-# Euron Coding Agent
+<div align="center">
 
-A lightweight, **Cline/OpenCode-style agentic coding assistant** with the agent
-brain written entirely in **Python** and a thin **VS Code** front-end. It also
-runs **fully from the CLI** — no editor required.
+# 🤖 Euron Coding Agent
 
-It is **provider-agnostic**: point it at Euron/Euri, OpenAI, OpenRouter,
-Anthropic, or any **self-hosted / OpenAI-compatible** server (Ollama, vLLM, LM
-Studio, llama.cpp) by editing one config file.
+**An open-source, model-agnostic agentic coding assistant — CLI + VS Code extension.**
+A combination of the best ideas from Claude Code, Cursor, and Cline, built to run
+**anywhere**, with **any model**, fully **self-hostable**.
 
-```
-VS Code webview ──postMessage──> Extension host ──WebSocket──> Python FastAPI
-                                                                     │
-                                                            agent loop (tool calling)
-                                                                     │
-                                              read · search · edit · write · run command
-```
+[![PyPI](https://img.shields.io/pypi/v/euron-coding-agent.svg)](https://pypi.org/project/euron-coding-agent/)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://pypi.org/project/euron-coding-agent/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen.svg)](backend/tests)
 
-## Why it behaves well even with small models
+<!-- AUTOGEN:STATUS -->
+**Latest: v1.0.0** · 28 tools · 15 providers · 60 tests passing
+<!-- /AUTOGEN:STATUS -->
 
-- **Native tool-calling agent loop** (plan → read → edit → run → verify), not a
-  one-shot "return JSON" hack. The model iterates on real tool results.
-- **Surgical `edit_file`** (exact search/replace, like Claude Code) so small
-  models don't have to regurgitate whole files.
-- **Tight, plan-first system prompt** and only-what's-needed context.
-- **Approval gating with diffs** — nothing is written or executed without your OK.
-
-## Claude-Code-style capabilities (model-agnostic)
-
-- **Plan mode** · **sub-agents** (`spawn_agent`) · live **TODO checklist**
-- **MCP** — connect any Model Context Protocol server (`pip install
-  "euron-coding-agent[mcp]"`); tools appear as `mcp__server__tool`
-- **Web** `web_search` + `web_fetch` · **git** tools · **background** processes
-- `glob`, `multi_edit`, streaming command output, `@file` mentions
-- **Undo/checkpoints**, **cancel/stop**, **persistent history**, **`/compact`**
-- **Permissions** (allow/ask/deny + "Always") · **hooks** · **project memory**
-  (`AGENTS.md`) · **custom slash commands** (`.euron/commands/*.md`)
-- **Cost tracking** · **multimodal image input** (📎) · **extended thinking**
-- **Cloud/self-host**: `serve --host 0.0.0.0 --token …` with bearer auth
-- Works with **any** OpenAI-compatible or Anthropic model; capabilities degrade
-  gracefully when a model lacks them.
+</div>
 
 ---
 
-## 1. Backend (Python)
+## ✨ What is it?
 
-```bash
-cd backend
-python -m venv venv
-# Windows PowerShell:
-venv\Scripts\Activate.ps1
-# (bash/macOS/Linux: source venv/bin/activate)
+Euron Coding Agent is an autonomous coding agent with the **brain in Python** and a
+thin front-end. It plans, reads your code, edits files, runs commands, searches the
+web, reviews diffs, and coordinates teams of sub-agents — **with your approval at
+every step**. It runs three ways:
 
-pip install -r requirements.txt        # add: pip install anthropic  (only for Anthropic)
-pip install -e .                        # installs the `euron-agent` command
+- **CLI** — `pip install euron-coding-agent` → `euron-agent`
+- **VS Code extension** (and any Open VSX editor: Cursor, VSCodium, Windsurf)
+- **Self-hosted server** — `euron-agent serve --host 0.0.0.0` with bearer auth
 
-euron-agent init                        # creates config.yaml + .env in this folder
-```
+It is **not locked to any provider**. Bring your own key for any model, or run
+fully local with Ollama / LM Studio.
 
-Edit **`config.yaml`** to choose a provider and **`.env`** to add the API key.
-Examples for Euri, OpenAI, OpenRouter, Ollama, vLLM and Anthropic are all in
-`config.example.yaml`.
+## 🚀 Highlights
 
-### Use it from the terminal
-
-```bash
-euron-agent providers                   # list configured providers
-euron-agent run "add a /health route to app.py" --workspace .
-euron-agent chat                        # interactive REPL (keeps context)
-euron-agent run "..." --provider ollama --model qwen2.5-coder:7b
-euron-agent run "..." -y                # auto-approve edits & commands
-```
-
-### Or run it as a server (for VS Code / cURL)
-
-```bash
-euron-agent serve --port 8000
-# REST smoke test (auto-approve so it actually writes):
-curl -X POST http://127.0.0.1:8000/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"task":"create hello.py that prints hi","workspace_path":"/abs/path","auto_approve":true}'
-```
-
----
-
-## 2. VS Code extension
-
-**End users** don't do any of the backend setup above — they just install the
-extension. On first run it auto-creates a private Python venv, `pip install`s
-`euron-agent` from PyPI, and manages the server itself. They pick a provider
-(server icon), paste a key (key icon, stored in SecretStorage), and go.
-
-**To develop the extension:**
-
-```bash
-cd extension
-npm install
-npm run esbuild        # bundle src -> out/extension.js
-```
-
-Open the `extension/` folder in VS Code and press **F5** to launch an Extension
-Development Host. Click the **Euron Agent** icon in the activity bar. Use the
-toolbar buttons to **Select Provider** and **Set API Key**.
-
-To develop against your local backend instead of a PyPI install, run
-`euron-agent serve --port 8000` and set `euronAgent.serverUrl` to
-`ws://127.0.0.1:8000/ws`.
-
-| Setting | Meaning |
+| | |
 |---|---|
-| `euronAgent.model` | Override the model for the active provider. |
-| `euronAgent.pythonPath` | Python 3.9+ to use. Empty = auto-detect. |
-| `euronAgent.backendVersion` | Pin the PyPI backend version. Empty = latest. |
-| `euronAgent.serverUrl` | Advanced: connect to a backend you run yourself. |
+| 🧠 **Agentic loop** | plan → read → edit → run → verify, with native tool-calling |
+| 🔌 **Any model** | Anthropic, OpenAI, Gemini, OpenRouter, Groq, Cerebras, DeepSeek, Together, Mistral, xAI, Vercel AI Gateway, Ollama, LM Studio, or **any** OpenAI-compatible API |
+| 👥 **Multi-agent teams** | a coordinator delegates subtasks to specialists; **state persists** |
+| ⏰ **Scheduled agents** | run tasks on cron (`schedule create --cron "0 9 * * MON-FRI"`) |
+| 🧩 **MCP + Plugins + Skills** | unlimited tool & capability extensibility |
+| 📜 **Rules / Memory / Commands** | `AGENTS.md`, `.euron/skills`, `.euron/commands` |
+| ✅ **Approvals + permissions** | allow/ask/deny rules, diffs, undo, cancel |
+| 🔔 **Notifications** | Slack · Discord · Telegram |
+| 🖼️ **Multimodal** | attach images to vision models |
+| 🌐 **Web** | `web_search` + `web_fetch` |
+| 🪪 **Headless** | `run --json` for CI/CD and scripting |
+| 🔒 **Self-host / cloud** | bind any host, bearer-token auth |
 
-## Distribution
+## 🧠 Works with every model
 
-To publish so anyone can install it, see **[PUBLISHING.md](PUBLISHING.md)** —
-PyPI + VS Code Marketplace + Open VSX, automated via GitHub Actions on a version
-tag.
+Not locked to one provider. Built-in profiles (just pick one and add a key):
+
+| Provider | Example models | Key env |
+|---|---|---|
+| **Anthropic** | Claude Opus / Sonnet / Haiku | `ANTHROPIC_API_KEY` |
+| **OpenAI** | GPT series | `OPENAI_API_KEY` |
+| **Google Gemini** | Gemini series (OpenAI-compatible endpoint) | `GEMINI_API_KEY` |
+| **OpenRouter** | 200+ models from any provider | `OPENROUTER_API_KEY` |
+| **Groq / Cerebras** | fast inference (Llama, etc.) | `GROQ_API_KEY` / `CEREBRAS_API_KEY` |
+| **DeepSeek / Together / Mistral / xAI** | their hosted models | `*_API_KEY` |
+| **Vercel AI Gateway** | models via the gateway | `AI_GATEWAY_API_KEY` |
+| **Euron / Euri** | Euron-hosted models | `EURI_API_KEY` |
+| **Ollama / LM Studio** | local models, no key | — |
+| **Custom** | any OpenAI-compatible / self-hosted (incl. AWS Bedrock, Azure, GCP Vertex via a proxy) | configurable |
+
+> Capabilities (vision, tools, thinking) degrade gracefully when a model lacks them.
 
 ---
 
-## 3. Project layout
+## 📦 Installation
 
-```
-backend/
-  euron_agent/
-    config.py        # layered config + provider profiles
-    llm.py           # OpenAI-compatible + Anthropic clients (one interface)
-    tools.py         # sandboxed file/search/command tools + diff generation
-    tool_schemas.py  # function-calling schemas
-    prompts.py       # system prompt
-    loop.py          # the agentic loop (streaming + approval gating)
-    events.py        # event protocol + AgentIO interface
-    server.py        # FastAPI: /ws (streaming) + /agent/run (REST)
-    cli.py           # run / chat / serve / providers / init
-  config.example.yaml
-extension/
-  src/extension.ts   # webview + backend connection/auto-start bridge
-  media/             # chat UI (main.js, style.css)
+### CLI (pip)
+
+```bash
+pip install euron-coding-agent          # add "[anthropic]" for native Claude, "[mcp]" for MCP
+euron-agent                             # interactive chat in the current folder
 ```
 
-## Safety
+Then set a provider + key right inside the chat — no files needed:
 
-Edits and shell commands require explicit approval (toggle per-provider in
-config). All file access is sandboxed to the workspace root; `.env` and ignored
-paths are never read or written; commands have a timeout. See
-`backend/config.example.yaml` → `agent:` and `ignore:`.
+```
+you: /provider openai      # or gemini, anthropic, groq, ollama, …
+you: /key                  # paste your API key (stored in ~/.euron-agent)
+you: create a FastAPI hello-world app with a test
+```
 
-## Roadmap (post-MVP)
+### VS Code extension
 
-Git-diff checkpoints/undo · per-project memory · `@file` mentions · multi-root ·
-test-runner tool · RAG over the codebase · model picker in the UI.
+Install **“Euron Coding Agent”** from the Marketplace (or Open VSX for
+Cursor/VSCodium/Windsurf). On first run it auto-installs its Python backend
+(needs Python 3.9+). Click the robot icon → pick a provider (server icon) → paste
+a key (key icon) → start chatting. Diffs, approvals, plan mode, and an image
+attach (📎) are all in the panel.
+
+> Requires Python 3.9+ on your machine for the managed backend.
+
+---
+
+## ⚡ Quick start (CLI)
+
+```bash
+euron-agent                                   # chat (remembers provider/key)
+euron-agent run "add a /health route" -y      # one-shot, auto-approve
+euron-agent run "summarize the repo" --json    # headless JSON for CI/scripts
+euron-agent --team-name auth-sprint "Plan and implement auth with tests"
+euron-agent schedule create "PR summary" --cron "0 9 * * MON-FRI" \
+    --prompt "List open PRs and their review status" --workspace .
+euron-agent schedule daemon                   # fire due schedules
+euron-agent serve --host 0.0.0.0 --port 8000  # self-host (prints a bearer token)
+```
+
+In-chat slash commands: `/provider /key /model /effort /plan /review /compact
+/init /skills /search /usage /undo /reset /yes /help /exit` — plus any custom
+command you drop in `.euron/commands/`.
+
+---
+
+## 🛠️ Features in depth
+
+### Agentic loop & tools
+Native tool-calling loop. **25+ tools**: `read_file`, `write_file`, `edit_file`,
+`multi_edit`, `create_file`, `delete_file`, `glob`, `search_text`, `run_command`
+(streaming output), background processes (`bash_background`/`process_*`),
+`git_status`/`git_diff`/`git_commit`/`git_branch`/`git_push`/`open_pr`, git
+**worktrees** (`worktree_add/list/remove`), `web_search`, `web_fetch`, plus meta
+tools `todo_write`, `spawn_agent`, `update_plan`, `use_skill`. All
+**workspace-sandboxed**.
+
+### Plan mode
+Research read-only, propose a plan, you approve, then it executes (`/plan` or the
+extension toggle).
+
+### Multi-agent teams
+A coordinator breaks work into subtasks and delegates to specialist sub-agents
+(own context/tools). **Team state persists** across sessions:
+```bash
+euron-agent --team-name auth-sprint "Plan and implement user authentication"
+euron-agent --team-name auth-sprint        # resume later
+euron-agent team                           # list teams
+```
+
+### Scheduled agents
+Cron-driven automations that survive restarts (daily PR summaries, weekly
+dependency checks, health reports):
+```bash
+euron-agent schedule create "deps" --cron "0 8 * * MON" --prompt "Check for outdated deps" --workspace /repo
+euron-agent schedule list
+euron-agent schedule daemon       # run the scheduler (independent of any chat)
+```
+
+### Notifications
+Push results to **Slack / Discord / Telegram** (`notifications:` in config) — great
+with scheduled and headless runs.
+
+### MCP, Plugins, Skills, Rules, Commands — make it your own
+- **MCP servers** — connect any Model Context Protocol server; tools appear as
+  `mcp__server__tool`. Config under `mcp.servers`.
+- **Plugins** — install bundles of skills + commands + MCP from a folder or
+  `.zip`: `euron-agent plugin add <dir|url>`.
+- **Skills** — `.euron/skills/<name>/SKILL.md` (loaded on demand via `use_skill`).
+- **Rules / Memory** — `AGENTS.md` (or `EURON.md`/`CLAUDE.md`) auto-loaded into context.
+- **Custom commands** — `.euron/commands/<name>.md` with `$ARGUMENTS` → `/name`.
+- **Hooks** — run shell commands on PreToolUse (blocking) / PostToolUse / Stop.
+- **Permissions** — `allow`/`ask`/`deny` by tool + glob, with an **Always** button.
+
+### Safety & control
+Approval + diffs on every mutation/command · per-turn **checkpoints + undo** ·
+**cancel/stop** · `.gitignore`-aware ignores · `.env` never read · command
+timeouts · sandboxed paths · **bearer-token auth** for remote serving.
+
+### Context & cost
+`@file` mentions · automatic **compaction** + `/compact` summarization · **token +
+$ cost** tracking · **extended thinking** / reasoning effort presets.
+
+---
+
+## ⚙️ Configuration
+
+Three layers (later wins): built-in provider profiles → `config.yaml` →
+`~/.euron-agent/config.json` (set via `/provider`, `/key`) → CLI flags.
+
+```bash
+euron-agent init        # scaffold config.yaml + .env (optional — chat works without)
+```
+
+See [`backend/config.example.yaml`](backend/config.example.yaml) for every option:
+providers, `agent` knobs (max_steps, thinking, fallback_models, …), `permissions`,
+`hooks`, `mcp.servers`, `web`, and `notifications`.
+
+User data lives in `~/.euron-agent/`: `config.json` (provider/keys),
+`sessions/` (history), `permissions.json`, `plugins/`, `skills/`, `commands/`,
+`schedules.json`.
+
+---
+
+## ✅ What's included vs. not
+
+**Included** (parity with — or beyond — Claude Code / Cursor / Cline):
+agentic loop · multi-file edits · plan mode · **multi-agent teams** ·
+**scheduled agents** · MCP · **plugins** · **skills** · rules/memory · custom
+commands · hooks · permissions · approvals+diffs · checkpoints/undo · cancel ·
+named **sessions** (resume/dashboard/search) · web search/fetch · multimodal
+images · cost/usage · thinking/effort · git + CI/PR tools · **worktree isolation**
+· `/review` code review · **notifications** (Slack/Discord/Telegram) · headless
+JSON · self-host + auth · **every model**.
+
+**Intentionally not included** (different product surface / would break
+model-agnosticism):
+- Cursor **Tab** (proprietary inline-completion model)
+- A **hosted cloud service** with managed background agents / mobile apps
+- A managed PR-review **SaaS** (we ship the local `/review` equivalent)
+- **Computer-use** GUI control · browser automation
+- Vector-DB / embeddings indexing (we use ripgrep + agentic search, like Claude Code)
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design and
+[`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) for a file-by-file tour.
+
+---
+
+## 🏗️ Self-hosting / cloud
+
+```bash
+euron-agent serve --host 0.0.0.0 --port 8000     # prints a bearer token
+# point the extension at it:  euronAgent.serverUrl = ws://HOST:8000/ws ; euronAgent.token = <token>
+```
+REST `POST /agent/run` (with `Authorization: Bearer …`) for CI/CD. WebSocket `/ws`
+for streaming + approvals.
+
+## 🧪 Develop & test
+
+```bash
+cd backend && pip install -e ".[dev]" && pytest -v     # 60 tests
+cd extension && npm install && npm run esbuild && npx vsce package
+```
+
+## 📦 Publishing (maintainers)
+
+Tag a release and CI publishes everything; see
+[`PUBLISHING.md`](PUBLISHING.md) and `.github/workflows/`.
+```bash
+git tag v1.0.0 && git push origin v1.0.0     # → PyPI + Marketplace + Open VSX
+```
+
+## 🤝 Contributing
+
+Issues and PRs welcome. The agent is built to be extended — add a tool in
+`backend/euron_agent/tools.py`, a provider in `config.py`, or a skill/plugin with
+no code at all. Run `pytest` before submitting.
+
+## 📄 License
+
+**Apache License 2.0** — Copyright © 2026 **Euron Engage Sphere Technology Private
+Limited**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

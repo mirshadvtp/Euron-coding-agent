@@ -666,3 +666,90 @@ def test_plugins(tmp_path, monkeypatch):
     assert "foo" in load_skills(str(tmp_path / "ws"))
     assert "hi" in load_commands(str(tmp_path / "ws"))
     assert pl.remove("myplug")
+
+
+# --------------------------------------------------------------------------- #
+# 1.0.0: providers / teams / schedules / notify / headless
+# --------------------------------------------------------------------------- #
+def test_many_providers():
+    cfg = load_config()
+    expected = {"gemini", "groq", "cerebras", "deepseek", "together", "mistral", "xai", "vercel", "lmstudio"}
+    assert expected <= set(cfg.all_providers)
+    g = load_config(provider="gemini")
+    assert "generativelanguage" in (g.provider.base_url or "")
+
+
+def test_team_id():
+    from euron_agent.teams import team_id
+    assert team_id("Auth Sprint!") == "team-auth-sprint"
+
+
+def test_cron_match():
+    from datetime import datetime
+    from euron_agent.schedules import cron_match
+    dt = datetime(2026, 6, 15, 9, 0)
+    assert cron_match("* * * * *", dt)
+    assert cron_match("0 9 * * *", dt)
+    assert not cron_match("30 9 * * *", dt)
+    assert cron_match("0 9 15 6 *", dt)
+    assert not cron_match("0 9 16 6 *", dt)
+    assert cron_match("0 9 * * MON-FRI", dt) == (dt.weekday() < 5)
+    assert cron_match("*/15 * * * *", datetime(2026, 6, 15, 9, 30))
+
+
+def test_schedules_crud(tmp_path, monkeypatch):
+    from datetime import datetime
+    import euron_agent.schedules as sc
+    monkeypatch.setattr(sc, "SCHEDULES_FILE", tmp_path / "sch.json")
+    s = sc.create("daily", "* * * * *", "do it", str(tmp_path))
+    assert sc.list_schedules()[0]["name"] == "daily"
+    assert sc.get(s["id"])["cron"] == "* * * * *"
+    now = datetime(2026, 6, 15, 9, 0)
+    assert sc.due(now)
+    sc.mark_run(s["id"], now.strftime("%Y-%m-%d %H:%M"))
+    assert not sc.due(now)
+    assert sc.remove(s["id"])
+
+
+def test_notify_dispatch(monkeypatch):
+    import httpx
+    import euron_agent.notify as nt
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: type("R", (), {"status_code": 200})())
+    assert nt.send_slack("http://x", "hi")
+    assert nt.dispatch({"slack_webhook": "http://x", "discord_webhook": "http://y"}, "hi") == ["slack", "discord"]
+    assert nt.dispatch({}, "hi") == []
+
+
+def test_loop_notify(tmp_path, monkeypatch):
+    sent = []
+    import euron_agent.notify as nt
+    monkeypatch.setattr(nt, "dispatch", lambda cfg, text: sent.append(text) or ["slack"])
+    cfg = load_config(provider="openai", api_key="x")
+    cfg.notifications = {"on": ["done"], "slack_webhook": "http://x"}
+    io = CollectIO()
+    sess = AgentSession(str(tmp_path), cfg, io)
+    sess.client = ScriptedClient([LLMResponse(content="all done", tool_calls=[])])
+    run(sess.run("hi"))
+    assert sent and "all done" in sent[0]
+
+
+def test_headless_run(tmp_path, monkeypatch):
+    import euron_agent.loop as loopmod
+    monkeypatch.setattr(loopmod, "build_client",
+                        lambda p, a=None: ScriptedClient([LLMResponse(content="headless ok", tool_calls=[])]))
+    from euron_agent.headless import run_headless
+    res = run(run_headless("do x", str(tmp_path)))
+    assert res["final"] == "headless ok"
+
+
+def test_team_mode(tmp_path, monkeypatch):
+    import euron_agent.sessions as s
+    monkeypatch.setattr(s, "SESSIONS_DIR", tmp_path / "sessions")
+    cfg = load_config(provider="openai", api_key="x")
+    io = CollectIO()
+    sess = AgentSession(str(tmp_path), cfg, io, team="auth-sprint")
+    sess.client = ScriptedClient([LLMResponse(content="coordinated", tool_calls=[])])
+    run(sess.run("plan auth"))
+    assert sess.session_id == "team-auth-sprint"
+    # team coordinator instructions injected into the system prompt
+    assert any("COORDINATOR" in (m.get("content") or "") for m in sess.messages if m.get("role") == "system")

@@ -69,11 +69,18 @@ class AgentSession:
         plan_mode: bool = False,
         depth: int = 0,
         session_id: str | None = None,
+        team: str | None = None,
     ):
         self.workspace = workspace
         self.config = config
         self.io = io
+        self.team = team
         self.client = build_client(config.provider, config.agent)
+        if team:
+            from . import teams
+
+            persist = True
+            session_id = teams.team_id(team)
 
         ignore = list(config.ignore)
         if config.agent.use_gitignore:
@@ -126,6 +133,10 @@ class AgentSession:
         skill_text = skills_mod.skills_summary(self.skills)
         if skill_text:
             base += "\n\n# Skills\n" + skill_text
+        if self.team:
+            from . import teams
+
+            base += teams.coordinator_prompt(self.team)
         return base
 
     def _ensure_system(self) -> None:
@@ -164,12 +175,15 @@ class AgentSession:
             content = expanded
         self.messages.append({"role": "user", "content": content})
 
+        status = "done"
         try:
             await self._agent_loop()
         except LLMError as e:
+            status = "error"
             await self.io.emit(ev.error(f"LLM error: {e}"))
             await self.io.emit(ev.done("failed"))
         except Exception as e:  # noqa: BLE001
+            status = "error"
             await self.io.emit(ev.error(f"Agent error: {type(e).__name__}: {e}"))
             await self.io.emit(ev.done("failed"))
         finally:
@@ -177,6 +191,23 @@ class AgentSession:
                 await asyncio.to_thread(self.hooks.run, "Stop", {})
             if self.persist and self.session_id:
                 sessions.save(self.session_id, self.workspace, self.messages)
+            await self._maybe_notify(status)
+
+    async def _maybe_notify(self, status: str) -> None:
+        notif = self.config.notifications
+        if not notif or self.depth != 0:
+            return
+        if status not in notif.get("on", ["done"]):
+            return
+        summary = next(
+            (m["content"] for m in reversed(self.messages)
+             if m.get("role") == "assistant" and m.get("content")),
+            "(no summary)",
+        )
+        from . import notify as _notify
+
+        text = f"🤖 Euron Agent [{status}] in {self.workspace}\n{str(summary)[:1500]}"
+        await asyncio.to_thread(_notify.dispatch, notif, text)
 
     async def _agent_loop(self) -> None:
         for step in range(self.config.agent.max_steps):

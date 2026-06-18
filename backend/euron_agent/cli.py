@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import sys
 from pathlib import Path
@@ -213,7 +214,81 @@ async def _run_task(task: str, args) -> None:
 
 
 def cmd_run(args) -> None:
-    asyncio.run(_run_task(args.task, args))
+    if getattr(args, "json", False):
+        from .headless import run_headless
+
+        res = asyncio.run(run_headless(
+            args.task, str(Path(args.workspace).resolve()),
+            provider=args.provider, model=args.model,
+            json_stream=True, team=getattr(args, "team_name", None),
+        ))
+        print(json.dumps({"type": "result", **res}))
+    else:
+        asyncio.run(_run_task(args.task, args))
+
+
+def cmd_team(args) -> None:
+    from . import teams
+
+    rows = teams.list_teams()
+    if rows:
+        for t in rows:
+            console.print(f"  [cyan]{t['id']}[/cyan]  {(t.get('title') or '')[:60]}")
+        console.print("[dim]resume: euron-agent --team-name <name>[/dim]")
+    else:
+        console.print("[dim]no teams yet — start one with: euron-agent --team-name <name>[/dim]")
+
+
+def cmd_schedule(args) -> None:
+    from . import schedules
+
+    if args.action == "create":
+        if not (args.name and args.cron and args.prompt):
+            console.print("[red]usage: schedule create <name> --cron \"...\" --prompt \"...\"[/red]")
+            return
+        s = schedules.create(args.name, args.cron, args.prompt,
+                             str(Path(args.workspace).resolve()), args.provider, args.model)
+        console.print(f"[green]created[/green] schedule {s['id']} · {s['cron']} · {s['name']}")
+    elif args.action == "list":
+        rows = schedules.list_schedules()
+        if not rows:
+            console.print("[dim]no schedules[/dim]")
+        for r in rows:
+            console.print(f"  [cyan]{r['id']}[/cyan]  {r['cron']:<18} {r['name']}  [dim]{r['workspace']}[/dim]")
+    elif args.action == "remove":
+        console.print("[green]removed[/green]" if schedules.remove(args.name or "") else "[yellow]not found[/yellow]")
+    elif args.action == "run":
+        from .headless import run_headless
+
+        s = schedules.get(args.name or "")
+        if not s:
+            console.print("[red]no such schedule id[/red]")
+            return
+        res = asyncio.run(run_headless(s["prompt"], s["workspace"],
+                                       provider=s.get("provider"), model=s.get("model")))
+        console.print(res["final"][:1000])
+    elif args.action == "daemon":
+        asyncio.run(_schedule_daemon())
+
+
+async def _schedule_daemon() -> None:
+    from datetime import datetime
+
+    from . import schedules
+    from .headless import run_headless
+
+    console.print("[cyan]Euron Agent scheduler[/cyan] running — Ctrl+C to stop")
+    while True:
+        now = datetime.now().replace(second=0, microsecond=0)
+        for s in schedules.due(now):
+            schedules.mark_run(s["id"], now.strftime("%Y-%m-%d %H:%M"))
+            console.print(f"[green]▸ running[/green] {s['name']} ({s['id']})")
+            try:
+                await run_headless(s["prompt"], s["workspace"],
+                                   provider=s.get("provider"), model=s.get("model"))
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[red]schedule error:[/red] {e}")
+        await asyncio.sleep(60)
 
 
 HELP = """[bold]commands[/bold]
@@ -412,8 +487,11 @@ async def _chat(args) -> None:
     workspace = str(Path(args.workspace).resolve())
     io = TerminalIO(auto_approve=getattr(args, "yes", False))
     sid = getattr(args, "session", None)
+    team = getattr(args, "team_name", None)
     persist = bool(getattr(args, "resume", False) or sid)
-    session = AgentSession(workspace, cfg, io, persist=persist, session_id=sid)
+    session = AgentSession(workspace, cfg, io, persist=persist, session_id=sid, team=team)
+    if team:
+        console.print(f"[magenta]team mode:[/magenta] coordinating '{team}' (state persists)")
     console.print(
         Panel(
             f"Euron Agent · [bold]{cfg.provider.name}[/bold] / {cfg.provider.model}\n"
@@ -602,12 +680,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", help="Override active provider profile")
     p.add_argument("--model", help="Override model id")
     p.add_argument("--workspace", default=os.getcwd(), help="Workspace root (default: cwd)")
+    p.add_argument("--team-name", dest="team_name", help="Run as a coordinator for this named team")
     sub = p.add_subparsers(dest="command")
     sub.required = False  # bare `euron-agent` -> chat
 
     r = sub.add_parser("run", help="Run a single task and exit")
     r.add_argument("task")
     r.add_argument("--yes", "-y", action="store_true", help="Auto-approve all actions")
+    r.add_argument("--json", action="store_true", help="Headless: stream events as JSON (auto-approve)")
     r.set_defaults(func=cmd_run)
 
     c = sub.add_parser("chat", help="Interactive REPL")
@@ -635,6 +715,15 @@ def build_parser() -> argparse.ArgumentParser:
     se = sub.add_parser("sessions", help="List saved sessions (dashboard)")
     se.add_argument("--all", action="store_true", help="All workspaces, not just this one")
     se.set_defaults(func=cmd_sessions)
+
+    sub.add_parser("team", help="List multi-agent teams").set_defaults(func=cmd_team)
+
+    sch = sub.add_parser("schedule", help="Scheduled agents (cron)")
+    sch.add_argument("action", choices=["create", "list", "remove", "run", "daemon"])
+    sch.add_argument("name", nargs="?", help="Schedule name (create) or id (remove/run)")
+    sch.add_argument("--cron", help='Cron expression, e.g. "0 9 * * MON-FRI"')
+    sch.add_argument("--prompt", help="Task prompt to run")
+    sch.set_defaults(func=cmd_schedule)
     return p
 
 

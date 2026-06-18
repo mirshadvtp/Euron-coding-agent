@@ -126,6 +126,14 @@ mcp:
     # remote:
     #   url: https://example.com/mcp   # SSE/HTTP endpoint
 
+# Push agent results to chat platforms (used on task completion + by schedules).
+notifications:
+  on: [done]                  # which events: done | error
+  slack_webhook: null         # https://hooks.slack.com/services/...
+  discord_webhook: null       # https://discord.com/api/webhooks/...
+  telegram_token: null        # bot token from @BotFather
+  telegram_chat_id: null      # chat id to send to
+
 # Files the agent must never read or write (globs, matched against rel path).
 ignore:
   - ".git/**"
