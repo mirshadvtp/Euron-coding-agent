@@ -9,25 +9,26 @@ anywhere, with any model, fully self-hostable.
 [![PyPI](https://img.shields.io/pypi/v/euron-coding-agent.svg)](https://pypi.org/project/euron-coding-agent/)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://pypi.org/project/euron-coding-agent/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-74%20passing-brightgreen.svg)](backend/tests)
+[![Tests](https://img.shields.io/badge/tests-80%20passing-brightgreen.svg)](backend/tests)
 
 <!-- AUTOGEN:STATUS -->
-**Latest: v1.2.0** · 31 tools · 15 providers · 74 tests passing
+**Latest: v1.3.0** · 31 tools · 15 providers · 80 tests passing
 <!-- /AUTOGEN:STATUS -->
 
 </div>
 
 ---
 
-> **New in 1.2.0** - Goes deeper on **agent-of-agent**, **token-saving**, and
-> **security**: a `repo_map` outline tool (read outlines, not whole files),
-> `secret_scan` + `dependency_audit`, an autonomous **`/secfix`** remediation loop, a
-> **tamper-evident audit log** (`/audit`), a **sandbox/egress policy**, nested
-> sub-agent **budgets** + **model routing**, an opt-in **verifier** + **self-heal**,
-> **`euron-agent doctor`**, **`init-ci`**, and Anthropic **prompt caching**.
-> 1.1.0 added drag-and-drop **file/folder/image** context, **plan + execute** modes,
-> and a **security audit** + autonomous testing (`/security`, `/test`, `/testall`).
-> See the [changelog](extension/CHANGELOG.md).
+> **New in 1.3.0** - **Multi-model routing**: assign a *different model from any
+> provider* to each phase - a strong reasoning model for **planning**, your balanced
+> model for **execution**, a cheap/fast model for **sub-agents** and **verification** -
+> with automatic **escalation** to a stronger model when the cheap one struggles. No
+> provider lock-in; spend the least that still gets the job done. Configure in
+> `config.yaml` (`models:` + `routing:`), inspect with `euron-agent models` / `/models`.
+> See [docs/MULTI_MODEL.md](docs/MULTI_MODEL.md). 1.2.0 added `repo_map`, `secret_scan`
+> + `dependency_audit`, `/secfix`, a tamper-evident **audit log**, a **sandbox/egress
+> policy**, sub-agent **budgets**, a **verifier** + **self-heal**, `doctor`, and
+> `init-ci`. See the [changelog](extension/CHANGELOG.md).
 
 ## What is it?
 
@@ -49,6 +50,7 @@ local with Ollama or LM Studio.
 |---|---|
 | Agentic loop | plan, read, edit, run, verify, with native tool-calling |
 | Any model | Anthropic, OpenAI, Gemini, OpenRouter, Groq, Cerebras, DeepSeek, Together, Mistral, xAI, Vercel AI Gateway, Ollama, LM Studio, or any OpenAI-compatible API |
+| Multi-model routing | a different model per phase (plan/execute/sub-agent/verify) across providers, cost-aware with auto-escalation |
 | Multi-agent teams | a coordinator delegates subtasks to specialists; state persists |
 | Scheduled agents | run tasks on cron (`schedule create --cron "0 9 * * MON-FRI"`) |
 | MCP, plugins, skills | unlimited tool and capability extensibility |
@@ -85,6 +87,34 @@ Not locked to one provider. Built-in profiles (just pick one and add a key):
 | Custom | any OpenAI-compatible / self-hosted (incl. AWS Bedrock, Azure, GCP Vertex via a proxy) | configurable |
 
 Capabilities (vision, tools, thinking) degrade gracefully when a model lacks them.
+
+### Multi-model routing (one model per job, no lock-in)
+
+Model-provider lock-in does not age well - the best/cheapest model rotates every
+few months. So you can assign a **different model from any provider to each phase**
+of the work and let the agent optimize cost without compromising quality:
+
+```yaml
+models:
+  planner:  { provider: anthropic, model: claude-opus-4-8 }      # strong reasoning
+  executor: { provider: openai,    model: gpt-5.5 }              # balanced main model
+  cheap:    { provider: groq,      model: llama-3.3-70b-versatile }  # fast & cheap
+  verifier: { provider: gemini,    model: gemini-2.5-flash }
+routing:
+  strategy: auto        # cheap where safe + auto-escalate when the cheap model struggles
+  plan: planner
+  execute: executor
+  subagent: cheap
+  verify: verifier
+  escalate: planner     # jump to this strong model on repeated failures
+```
+
+- **Cheap where safe** (sub-agents, verifier), **your model for execution**, a
+  **strong model for planning**, and **automatic escalation** to a stronger model
+  when the cheaper one keeps failing - so you pay for the expensive model only on the
+  hard steps. Cost is tracked per model actually used.
+- Inspect the active routing with `euron-agent models` or `/models`.
+- Full guide: **[docs/MULTI_MODEL.md](docs/MULTI_MODEL.md)**.
 
 ---
 
@@ -145,7 +175,7 @@ euron-agent schedule daemon                   # fire due schedules
 euron-agent serve --host 0.0.0.0 --port 8000  # self-host (prints a bearer token)
 ```
 
-In-chat slash commands: `/provider /key /model /effort /plan /execute /review
+In-chat slash commands: `/provider /key /model /models /effort /plan /execute /review
 /security /scan /secfix /test /testall /audit /doctor /compact /init /skills /search
 /usage /undo /reset /yes /help /exit` - plus any custom command you drop in
 `.euron/commands/`.

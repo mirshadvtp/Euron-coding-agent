@@ -28,6 +28,7 @@ from .events import AgentIO, ApprovalDecision
 from .hooks import HookRunner
 from .llm import LLMError, build_client
 from .mcp_client import MCPManager, is_mcp_tool
+from .modelrouter import ModelRouter
 from .permissions import Permissions
 from .prompts import system_prompt
 from .tool_schemas import LOOP_TOOLS, schemas_for
@@ -83,13 +84,22 @@ class AgentSession:
         self.io = io
         self.team = team
         self.dangerous = dangerous  # YOLO: never ask, run everything
+        # Multi-model router: one model per phase (plan/execute/subagent/verify),
+        # cost-aware with escalation. self.client is the active/execute-phase client
+        # (built here so it stays the patch/injection point); the router supplies a
+        # distinct client only for phases that diverge to another model.
         self.client = build_client(config.provider, config.agent)
+        self.router = ModelRouter(config)
         # Tamper-evident audit trail (shared across nested sub-agents).
         self.audit = audit or audit_log.AuditLog(workspace, enabled=config.agent.audit_log)
         # Shared agent-of-agent budget (calls + tokens) across the whole tree.
         self._budget = budget if budget is not None else {"calls": 0, "tokens": 0}
         self._turn_mutated: set[str] = set()
         self._heal_attempts: dict[str, int] = {}
+        self._escalated = False
+        self._fail_streak = 0
+        self._step_total = 0
+        self._step_fail = 0
         if team:
             from . import teams
 
@@ -142,6 +152,12 @@ class AgentSession:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    def _note(self, ok: bool) -> None:
+        """Record a per-step tool outcome (drives cost-aware escalation)."""
+        self._step_total += 1
+        if not ok:
+            self._step_fail += 1
+
     def _record_audit(self, tool: str, args: dict, decision: str,
                       ok: bool | None, summary: str = "") -> None:
         try:
@@ -188,6 +204,8 @@ class AgentSession:
         self.checkpointer.begin_turn()
         self._turn_mutated = set()
         self._heal_attempts = {}
+        self._escalated = False
+        self._fail_streak = 0
 
         if self.hooks.active:
             await asyncio.to_thread(self.hooks.run, "UserPromptSubmit", {"prompt": task})
@@ -256,10 +274,22 @@ class AgentSession:
                     self.messages = compacted
                     await self.io.emit(ev.info("compacted older context to fit the window"))
 
-            await self.io.emit(ev.status(f"thinking (step {step + 1})"))
+            # Pick the model for this step: planner in plan mode, executor
+            # otherwise — or the escalation model once the cheaper one has
+            # struggled (cost-aware, but never at the expense of getting it done).
+            phase = "plan" if self.plan_mode else "execute"
+            if self._escalated and self.router.strategy != "fixed":
+                phase = "escalate"
+            # Reuse the injected/active client for phases that resolve to the active
+            # model; only build a separate client when a distinct model is configured.
+            client = (self.client if self.router.is_default_phase(phase)
+                      else self.router.client_for_phase(phase))
+            model_used = getattr(getattr(client, "provider", None), "model",
+                                 self.config.provider.model)
+            await self.io.emit(ev.status(f"thinking (step {step + 1}) · {model_used}"))
 
             resp = await asyncio.to_thread(
-                self.client.chat,
+                client.chat,
                 self.messages,
                 self._tools_for_turn(),
                 self.io.on_token,
@@ -268,7 +298,7 @@ class AgentSession:
 
             self.session_tokens += resp.prompt_tokens + resp.completion_tokens
             self.session_cost += pricing.cost_for(
-                self.config.provider.model, resp.prompt_tokens, resp.completion_tokens,
+                model_used, resp.prompt_tokens, resp.completion_tokens,
                 self.config.pricing,
             )
             await self.io.emit(
@@ -300,11 +330,32 @@ class AgentSession:
                 }
             )
 
+            self._step_total = 0
+            self._step_fail = 0
             for tc in resp.tool_calls:
                 await self._handle_tool_call(tc)
+            await self._maybe_escalate()
 
         await self.io.emit(ev.error("Reached max steps without finishing."))
         await self.io.emit(ev.done("max_steps"))
+
+    async def _maybe_escalate(self) -> None:
+        """Cost-aware quality guard: if every tool in a step failed for several
+        steps running, jump to the stronger 'escalate' model for the rest of the
+        turn. Cheap models do the easy work; the strong model rescues the hard parts."""
+        if self._escalated or self.router.strategy == "fixed":
+            return
+        if self._step_total and self._step_fail == self._step_total:
+            self._fail_streak += 1
+        else:
+            self._fail_streak = 0
+        if (self._fail_streak >= self.router.escalate_after
+                and self.router.has_distinct_escalation()):
+            self._escalated = True
+            self._fail_streak = 0
+            await self.io.emit(ev.info(
+                f"escalating to a stronger model ({self.router.model_for_phase('escalate')}) "
+                "after repeated failures"))
 
     # ------------------------------------------------------------------ #
     async def _handle_tool_call(self, tc) -> None:
@@ -333,6 +384,7 @@ class AgentSession:
                 await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
                 self._append_tool_result(tc.id, msg)
                 self._record_audit(tc.name, tc.arguments, "sandbox-deny", False, reason)
+                self._note(False)
                 return
 
         # Permission decision: allow / ask / deny. Dangerous mode allows everything.
@@ -342,6 +394,7 @@ class AgentSession:
             await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
             self._append_tool_result(tc.id, msg)
             self._record_audit(tc.name, tc.arguments, "deny", False)
+            self._note(False)
             return
         if decision == "ask":
             preview = (
@@ -358,6 +411,7 @@ class AgentSession:
                 await self.io.emit(ev.tool_result(tc.id, tc.name, False, msg))
                 self._append_tool_result(tc.id, msg)
                 self._record_audit(tc.name, tc.arguments, "reject", False, note)
+                self._note(False)
                 return
             if ok.always:
                 self.permissions.add_always_allow(tc.name, tc.arguments)
@@ -379,6 +433,7 @@ class AgentSession:
             out = await self.mcp.call(tc.name, tc.arguments)
             await self.io.emit(ev.tool_result(tc.id, tc.name, True, out))
             self._append_tool_result(tc.id, out)
+            self._note(True)
             return
 
         if tc.name in _FILE_MUTATORS and tc.arguments.get("path"):
@@ -403,6 +458,7 @@ class AgentSession:
         await self.io.emit(ev.tool_result(tc.id, tc.name, outcome.ok, outcome.output))
         self._record_audit(tc.name, tc.arguments, "allow", outcome.ok,
                            (outcome.output or "")[:200])
+        self._note(outcome.ok)
 
         result_text = outcome.output or "(no output)"
         heal = self._self_heal_note(tc, outcome)
@@ -478,7 +534,7 @@ class AgentSession:
         prompt = tc.arguments.get("prompt", "")
         await self.io.emit(ev.subagent_start(tc.id, desc))
 
-        sub_cfg = self._cfg_with_model(self.config.router.get("cheap") or self.config.subagent_model)
+        sub_cfg = self._cfg_for_phase("subagent")
         sub_io = _SubAgentIO(self.io)
         sub = AgentSession(self.workspace, sub_cfg, sub_io, depth=self.depth + 1,
                            audit=self.audit, budget=self._budget)
@@ -489,11 +545,14 @@ class AgentSession:
         await self.io.emit(ev.subagent_end(tc.id, summary[:280]))
         self._append_tool_result(tc.id, f"Sub-agent '{desc}' result:\n{summary}")
 
-    def _cfg_with_model(self, model: str | None):
-        """Return self.config, optionally with the provider model swapped (routing)."""
-        if not model:
+    def _cfg_for_phase(self, phase: str):
+        """A config whose ACTIVE provider is the model assigned to `phase` — so a
+        spawned sub-agent runs on (say) the cheap model while still inheriting the
+        full models/routing config for its own nested decisions."""
+        prov = self.router.provider_for_phase(phase)
+        if prov is self.config.provider:
             return self.config
-        return replace(self.config, provider=replace(self.config.provider, model=model))
+        return replace(self.config, provider=prov)
 
     def _self_heal_note(self, tc, outcome) -> str:
         """When a test/build command fails and self_heal is on, nudge the agent to
@@ -532,7 +591,7 @@ class AgentSession:
         )
         self._budget["calls"] += 1
         sub_io = _SubAgentIO(self.io)
-        sub_cfg = self._cfg_with_model(self.config.router.get("cheap") or self.config.subagent_model)
+        sub_cfg = self._cfg_for_phase("verify")
         sub = AgentSession(self.workspace, sub_cfg, sub_io, depth=self.depth + 1,
                            audit=self.audit, budget=self._budget)
         await sub.run(prompt)

@@ -43,6 +43,7 @@ file is required - just pick a provider and supply a key.
     euron-agent                     interactive chat (remembers provider/key)
     euron-agent run "<task>"        one-shot task ( --yes to auto-approve, --json headless )
     euron-agent providers           list configured providers
+    euron-agent models              show the multi-model routing table (per-phase model + price)
     euron-agent init                scaffold config.yaml + .env
     euron-agent serve               run the API / WebSocket server ( --port 0 = auto )
     euron-agent --team-name <name> "<task>"   multi-agent team (coordinator + specialists)
@@ -63,6 +64,16 @@ file is required - just pick a provider and supply a key.
 In-chat commands: /provider /key /model /effort /plan /execute /review /security
 /scan /secfix /test /testall /audit /doctor /compact /init /skills /search /usage
 /undo /reset /yes /help /exit, plus any custom command in .euron/commands/.
+
+## What's new (1.3.0)
+
+- **Multi-model routing**: assign a different model (from any provider) to each
+  phase — `planner`, `executor`, `cheap` (sub-agents), `verifier` — via `models:` +
+  `routing:` in config.yaml. Cost-aware `strategy: auto` runs cheap models where safe
+  and **auto-escalates** to a stronger model when the cheaper one keeps failing, so
+  you spend the least that still gets the job done. No provider lock-in.
+- `euron-agent models` / `/models`: see which model + price runs each phase.
+- Cost is now tracked per model actually used. See docs/MULTI_MODEL.md.
 
 ## What's new (1.2.0)
 
@@ -108,6 +119,7 @@ In-chat commands: /provider /key /model /effort /plan /execute /review /security
   branch/push, open_pr, git worktrees, web_search, web_fetch.
 - Plan mode and execute mode, sub-agents, and multi-agent teams with persistent state.
 - Drag-and-drop context: read files (any length), whole folders, and images.
+- Multi-model routing: a different model per phase across providers, cost-aware with auto-escalation.
 - Token-friendly code intelligence: `repo_map` outline tool, model routing, prompt caching.
 - Security suite: `/security`, `/scan`, `/secfix`, secret_scan + dependency_audit tools.
 - Tamper-evident audit log + sandbox/egress policy; sub-agent budgets, verifier, self-heal.

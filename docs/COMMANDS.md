@@ -21,6 +21,7 @@ Global CLI flags (must come **before** the subcommand): `--config <path>`,
 | `euron-agent chat` | Interactive REPL. `--session <id>` opens a specific saved session; `--resume` continues the latest. |
 | `euron-agent serve` | Run the HTTP / WebSocket server (self-host). `--host`, `--port` (0 = auto), `--token`, `--no-auth`, `--reload`. Prints a bearer token. |
 | `euron-agent providers` | List the configured provider profiles and which keys are set. |
+| `euron-agent models` | Show the multi-model routing table — which model (and price) runs each phase (plan/execute/subagent/verify/escalate). See [MULTI_MODEL.md](MULTI_MODEL.md). |
 | `euron-agent init` | Scaffold a starter `config.yaml` and `.env` in the current folder. |
 | `euron-agent update` | Update the installed `euron-coding-agent` package to the latest version. |
 | `euron-agent version` | Print the installed version. |
@@ -50,6 +51,7 @@ Global CLI flags (must come **before** the subcommand): `--config <path>`,
 | `/baseurl <url>` | Set a custom base URL (self-hosted / proxy endpoints). |
 | `/config` | Show current provider, model, base URL, and key status. |
 | `/providers` | List all known provider profiles. |
+| `/models` | Show the multi-model routing table (which model runs each phase + price). |
 | `/effort <low\|medium\|high>` | Set reasoning effort for capable models. |
 
 ### Modes

@@ -996,3 +996,83 @@ def test_subagent_budget_blocks(tmp_path, monkeypatch):
     run(sess._spawn_agent(_TC()))
     last = sess.messages[-1]
     assert "budget exhausted" in last["content"]
+
+
+# --------------------------------------------------------------------------- #
+# v1.3.0 — multi-model routing
+# --------------------------------------------------------------------------- #
+def test_model_router_default():
+    from euron_agent.modelrouter import ModelRouter
+    cfg = load_config()
+    r = ModelRouter(cfg)
+    for ph in ("plan", "execute", "subagent", "verify", "escalate"):
+        assert r.is_default_phase(ph)
+        assert r.model_for_phase(ph) == cfg.provider.model
+    assert not r.has_distinct_escalation()
+    assert len(r.summary()) == 5
+
+
+def test_model_router_multi_provider():
+    from euron_agent.modelrouter import ModelRouter
+    cfg = load_config()
+    cfg.models = {
+        "planner": {"provider": "anthropic", "model": "claude-opus-4-8"},
+        "cheap": {"model": "gpt-4o-mini"},   # same provider, cheaper model
+    }
+    cfg.routing = {"strategy": "auto", "plan": "planner", "subagent": "cheap",
+                   "verify": "cheap", "escalate": "planner"}
+    r = ModelRouter(cfg)
+    assert r.role_for_phase("plan") == "planner"
+    assert r.model_for_phase("plan") == "claude-opus-4-8"
+    assert r.provider_for_phase("plan").name == "anthropic"
+    assert not r.is_default_phase("plan")
+    assert r.model_for_phase("subagent") == "gpt-4o-mini"
+    assert r.provider_for_phase("subagent").name == cfg.provider.name
+    assert r.has_distinct_escalation()
+    rows = {row["phase"]: row for row in r.summary()}
+    assert rows["plan"]["model"] == "claude-opus-4-8"
+    assert rows["subagent"]["out_per_1m"] is not None  # gpt-4o-mini is priced
+
+
+def test_model_router_backcompat_router_cheap():
+    from euron_agent.modelrouter import ModelRouter
+    cfg = load_config()
+    cfg.router = {"cheap": "gpt-4o-mini"}
+    cfg.models = {}
+    cfg.routing = {}
+    r = ModelRouter(cfg)
+    assert "cheap" in r.roles
+    assert r.role_for_phase("subagent") == "cheap"
+    assert r.model_for_phase("subagent") == "gpt-4o-mini"
+
+
+def test_model_router_string_shorthand():
+    from euron_agent.modelrouter import ModelRouter
+    cfg = load_config()
+    cfg.models = {"cheap": "gpt-4o-mini"}   # shorthand: role -> model id
+    cfg.routing = {"subagent": "cheap"}
+    r = ModelRouter(cfg)
+    assert r.model_for_phase("subagent") == "gpt-4o-mini"
+
+
+def test_escalation_trigger(tmp_path):
+    cfg = load_config()
+    cfg.models = {"strong": {"model": "gpt-4o"}}
+    cfg.routing = {"strategy": "auto", "escalate": "strong", "escalate_after": 2}
+    sess = AgentSession(str(tmp_path), cfg, CollectIO())
+    assert sess.router.has_distinct_escalation()
+    assert sess._escalated is False
+    for _ in range(2):  # two consecutive all-failed steps
+        sess._step_total, sess._step_fail = 1, 1
+        run(sess._maybe_escalate())
+    assert sess._escalated is True
+
+
+def test_escalation_disabled_in_fixed(tmp_path):
+    cfg = load_config()
+    cfg.models = {"strong": {"model": "gpt-4o"}}
+    cfg.routing = {"strategy": "fixed", "escalate": "strong", "escalate_after": 1}
+    sess = AgentSession(str(tmp_path), cfg, CollectIO())
+    sess._step_total, sess._step_fail = 1, 1
+    run(sess._maybe_escalate())
+    assert sess._escalated is False

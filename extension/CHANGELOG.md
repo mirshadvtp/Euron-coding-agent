@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.0
+
+Multi-model routing — one model per job, across providers, no lock-in.
+
+- Assign a different model (from any provider) to each phase of the work via
+  `models:` and `routing:` in `config.yaml`:
+  - `plan` → a strong reasoning model
+  - `execute` → your balanced main model
+  - `subagent` → a cheap/fast model for delegated work
+  - `verify` → a cheap model for the post-edit critic
+  - `escalate` → the strong model to auto-jump to when quality slips
+- Each role can target a different provider (OpenAI + Anthropic + Groq + Gemini in
+  one config), each using its own API key.
+- Cost strategy: `strategy: auto` (default) runs cheap models where safe and
+  **automatically escalates** to the stronger `escalate` model after
+  `escalate_after` consecutive failed steps — pay for the expensive model only on
+  the hard parts. `strategy: fixed` disables escalation.
+- `euron-agent models` and `/models` show the routing table: which model + price
+  runs each phase.
+- Cost is now tracked per model actually used (accurate blended `/usage`).
+- Back-compatible: the older `router: {cheap, heavy}` / `subagent_model:` keys still
+  work and seed `cheap`/`heavy` roles automatically.
+- See docs/MULTI_MODEL.md.
+
 ## 1.2.0
 
 Agent-of-agent, token-friendly, and security features:

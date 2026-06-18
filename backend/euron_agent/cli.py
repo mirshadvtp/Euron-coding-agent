@@ -442,6 +442,7 @@ HELP = """[bold]commands[/bold]
   /baseurl [url]     set a custom base URL (self-hosted / custom endpoints)
   /config            show current provider, model, base URL, key status
   /providers         list known providers
+  /models            show the multi-model routing table (which model per phase)
   /plan              plan mode for the next task (research → approve → execute)
   /execute           execute mode — carry out the next task directly (default)
   /review            review the current git changes for bugs (like a code review)
@@ -476,6 +477,7 @@ SLASH_COMMANDS = [
     ("baseurl", "set a custom base URL"),
     ("config", "show current settings"),
     ("providers", "list known providers"),
+    ("models", "show the multi-model routing table"),
     ("plan", "plan mode for the next task"),
     ("execute", "execute mode — carry out the next task directly"),
     ("review", "review the current git changes"),
@@ -599,6 +601,34 @@ def _print_providers() -> None:
     console.print(table)
 
 
+def _print_models(cfg=None) -> None:
+    """Show the multi-model routing table: which model runs each phase + its price."""
+    from rich.table import Table
+
+    from .modelrouter import ModelRouter
+
+    cfg = cfg or load_config()
+    router = ModelRouter(cfg)
+    table = Table(title=f"Model routing (strategy: {router.strategy})")
+    table.add_column("phase")
+    table.add_column("role")
+    table.add_column("provider")
+    table.add_column("model")
+    table.add_column("in $/1M", justify="right")
+    table.add_column("out $/1M", justify="right")
+    for row in router.summary():
+        table.add_row(
+            row["phase"], row["role"], row["provider"], row["model"],
+            "—" if row["in_per_1m"] is None else f"{row['in_per_1m']:.2f}",
+            "—" if row["out_per_1m"] is None else f"{row['out_per_1m']:.2f}",
+        )
+    console.print(table)
+    if not cfg.models and not cfg.routing and not cfg.router:
+        console.print("[dim]Single-model setup. Configure `models:` and `routing:` in "
+                      "config.yaml to assign different models per phase. See "
+                      "docs/MULTI_MODEL.md.[/dim]")
+
+
 def _pick_provider() -> str:
     names = list(BUILTIN_PROVIDERS)
     for i, n in enumerate(names, 1):
@@ -657,6 +687,8 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
             console.print("[green]dangerous mode OFF[/green] - approvals restored.")
     elif cmd == "/providers":
         _print_providers()
+    elif cmd == "/models":
+        _print_models(session.config)
     elif cmd == "/config":
         p = session.config.provider
         keyset = bool(p.api_key or (p.api_key_env and os.getenv(p.api_key_env)))
@@ -925,6 +957,14 @@ def cmd_providers(args) -> None:
     _print_providers()
 
 
+def cmd_models(args) -> None:
+    try:
+        cfg = resolve_config(args)
+    except Exception:
+        cfg = load_config()
+    _print_models(cfg)
+
+
 def cmd_security(args) -> None:
     asyncio.run(_run_task(SECURITY_PROMPT, args))
 
@@ -1153,6 +1193,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_serve)
 
     sub.add_parser("providers", help="List configured providers").set_defaults(func=cmd_providers)
+    sub.add_parser("models", help="Show the multi-model routing table (per-phase model + price)").set_defaults(func=cmd_models)
     sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(func=cmd_init)
     sub.add_parser("update", help="Update euron-coding-agent to the latest version").set_defaults(func=cmd_update)
     sub.add_parser("version", help="Show the installed version").set_defaults(func=cmd_version)

@@ -86,6 +86,12 @@ class Config:
     # model routing: {"cheap": "<model>", "heavy": "<model>"} — cheap is used for
     # sub-agents / verifier / self-heal when set (auto-downshift).
     router: dict = field(default_factory=dict)
+    # multi-model: named model roles, each may target a different provider, e.g.
+    # {"planner": {"provider": "anthropic", "model": "claude-opus-4-8"}, ...}
+    models: dict = field(default_factory=dict)
+    # phase -> role mapping + strategy: {"strategy": "auto", "plan": "planner",
+    # "execute": "executor", "subagent": "cheap", "escalate": "planner", ...}
+    routing: dict = field(default_factory=dict)
     # run_command sandbox/egress policy: deny_commands (regex), allow_commands
     # (allowlist; if non-empty everything else is denied), block_network (bool).
     sandbox: dict = field(default_factory=dict)
@@ -332,5 +338,7 @@ def load_config(
         notifications=raw.get("notifications", {}) or {},
         pricing=raw.get("pricing", {}) or {},
         router=raw.get("router", {}) or {},
+        models=raw.get("models", {}) or {},
+        routing=raw.get("routing", {}) or {},
         sandbox=raw.get("sandbox", {}) or {},
     )
