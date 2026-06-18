@@ -751,6 +751,51 @@ def test_headless_run(tmp_path, monkeypatch):
     assert res["final"] == "headless ok"
 
 
+def test_max_tokens_compat():
+    from euron_agent.config import ProviderConfig
+    from euron_agent.llm import OpenAICompatClient, _detect_param_fix
+
+    err = ("Unsupported parameter: 'max_tokens' is not supported with this model. "
+           "Use 'max_completion_tokens' instead.")
+    assert _detect_param_fix(err, {"max_tokens": 100}) == "max_completion_tokens"
+    assert _detect_param_fix(
+        "temperature does not support 0.2; only the default (1) is supported",
+        {"temperature": 0.2}) == "drop_temperature"
+
+    prov = ProviderConfig(name="openai", type="openai", api_key="k", model="gpt-5.5")
+    c = OpenAICompatClient(prov)
+
+    calls = {"n": 0, "last": None}
+
+    class Msg:
+        content = "ok"
+        tool_calls = None
+
+    class Choice:
+        message = Msg()
+
+    class Resp:
+        choices = [Choice()]
+        usage = None
+
+    def fake_create(**kwargs):
+        calls["n"] += 1
+        calls["last"] = kwargs
+        if "max_tokens" in kwargs:
+            raise Exception("Unsupported parameter: 'max_tokens' is not supported. "
+                            "Use 'max_completion_tokens' instead.")
+        return Resp()
+
+    c.client.chat.completions.create = fake_create
+    resp = c.chat([{"role": "user", "content": "hi"}], stream=False)
+    assert resp.content == "ok"
+    assert "max_completion_tokens" in calls["last"] and "max_tokens" not in calls["last"]
+    # the fix is remembered: the next call goes straight through (one attempt)
+    calls["n"] = 0
+    c.chat([{"role": "user", "content": "again"}], stream=False)
+    assert calls["n"] == 1
+
+
 def test_team_mode(tmp_path, monkeypatch):
     import euron_agent.sessions as s
     monkeypatch.setattr(s, "SESSIONS_DIR", tmp_path / "sessions")

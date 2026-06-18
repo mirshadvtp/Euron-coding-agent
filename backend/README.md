@@ -12,9 +12,14 @@ Ollama, LM Studio, or any OpenAI-compatible / self-hosted endpoint.
 ## Install
 
     pip install euron-coding-agent
+    euron-agent update                            # update to the latest anytime
     # optional extras:
     pip install "euron-coding-agent[anthropic]"   # native Anthropic client
     pip install "euron-coding-agent[mcp]"         # Model Context Protocol servers
+
+Tip: install into a virtual environment for isolation. The client auto-adapts to
+each provider's API (e.g. models needing max_completion_tokens instead of
+max_tokens, or rejecting a custom temperature) - no model-specific config needed.
 
 ## Quick start (CLI)
 

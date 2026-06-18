@@ -12,7 +12,7 @@ anywhere, with any model, fully self-hostable.
 [![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen.svg)](backend/tests)
 
 <!-- AUTOGEN:STATUS -->
-**Latest: v1.0.2** · 28 tools · 15 providers · 60 tests passing
+**Latest: v1.0.3** · 28 tools · 15 providers · 61 tests passing
 <!-- /AUTOGEN:STATUS -->
 
 </div>
@@ -78,7 +78,22 @@ Capabilities (vision, tools, thinking) degrade gracefully when a model lacks the
 ```bash
 pip install euron-coding-agent          # add "[anthropic]" for native Claude, "[mcp]" for MCP
 euron-agent                             # interactive chat in the current folder
+euron-agent update                      # update to the latest version anytime
 ```
+
+Recommended (isolated, avoids dependency/locking issues, especially on Windows):
+
+```bash
+python -m venv euron-env
+# Windows: euron-env\Scripts\activate    |  macOS/Linux: source euron-env/bin/activate
+pip install euron-coding-agent
+euron-agent
+```
+
+You never need to configure model-specific quirks - the client auto-adapts to
+each provider's API (for example, models that require `max_completion_tokens`
+instead of `max_tokens`, or that reject a custom temperature, are handled
+automatically).
 
 Set a provider and key right inside the chat - no files needed:
 

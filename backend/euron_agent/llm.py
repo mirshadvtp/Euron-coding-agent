@@ -109,6 +109,21 @@ def _retryable(e: Exception) -> bool:
     return True
 
 
+def _detect_param_fix(errmsg: str, kwargs: dict) -> Optional[str]:
+    """Inspect a 400 'unsupported parameter' error and decide how to adapt the
+    request so it works with newer models (gpt-5.x, o-series, etc.) - generically,
+    with no per-model configuration."""
+    m = errmsg.lower()
+    if "max_completion_tokens" in m and "max_tokens" in m and "max_tokens" in kwargs:
+        return "max_completion_tokens"
+    if "temperature" in m and "max_tokens" not in m and any(
+        s in m for s in ("unsupported", "not supported", "does not support",
+                         "only the default", "only supports", "is not supported")
+    ):
+        return "drop_temperature"
+    return None
+
+
 def _estimate(text: str) -> int:
     return max(0, len(text) // 4)
 
@@ -159,6 +174,7 @@ class OpenAICompatClient(_RetryMixin):
         self.retry_attempts = attempts
         self.retry_backoff = backoff
         self.reasoning_effort = reasoning_effort
+        self._compat: set = set()  # learned param fixes (e.g. max_completion_tokens)
         self.client = OpenAI(
             api_key=provider.api_key or "sk-no-key-required",
             base_url=provider.base_url,
@@ -192,8 +208,33 @@ class OpenAICompatClient(_RetryMixin):
             resp.completion_tokens = _estimate(resp.content)
         return resp
 
+    def _apply_compat(self, kwargs: dict) -> dict:
+        k = dict(kwargs)
+        if "max_completion_tokens" in self._compat and "max_tokens" in k:
+            k["max_completion_tokens"] = k.pop("max_tokens")
+        if "drop_temperature" in self._compat:
+            k.pop("temperature", None)
+        return k
+
+    def _completions_create(self, kwargs: dict):
+        """Call the API, auto-adapting unsupported parameters (and remembering the
+        fix so later calls in this session skip the failed attempt)."""
+        last: Optional[Exception] = None
+        for _ in range(4):
+            attempt = self._apply_compat(kwargs)
+            try:
+                return self.client.chat.completions.create(**attempt)
+            except Exception as e:  # noqa: BLE001
+                fix = _detect_param_fix(str(e), attempt)
+                if not fix or fix in self._compat:
+                    raise
+                self._compat.add(fix)
+                last = e
+        if last:
+            raise last
+
     def _chat_once(self, kwargs: dict) -> LLMResponse:
-        resp = self.client.chat.completions.create(**kwargs)
+        resp = self._completions_create(kwargs)
         msg = resp.choices[0].message
         calls = [
             ToolCall(tc.id, tc.function.name, _safe_json_loads(tc.function.arguments or "{}"))
@@ -208,10 +249,9 @@ class OpenAICompatClient(_RetryMixin):
         )
 
     def _chat_stream(self, kwargs: dict, stream_cb: StreamCallback) -> LLMResponse:
-        kwargs = {**kwargs, "stream": True}
         content_parts: list[str] = []
         partial: dict[int, dict] = {}
-        for chunk in self.client.chat.completions.create(**kwargs):
+        for chunk in self._completions_create({**kwargs, "stream": True}):
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta

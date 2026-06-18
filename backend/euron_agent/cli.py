@@ -574,6 +574,24 @@ def cmd_providers(args) -> None:
     _print_providers()
 
 
+def cmd_update(args) -> None:
+    import subprocess
+
+    pkg = "euron-coding-agent"
+    console.print(f"[cyan]Updating {pkg} to the latest version...[/cyan]")
+    r = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-U", "--no-cache-dir", pkg]
+    )
+    if r.returncode == 0:
+        from . import __version__
+
+        console.print(f"[green]Done.[/green] Restart euron-agent to use the new version "
+                      f"(was {__version__}).")
+    else:
+        console.print("[red]Update failed.[/red] Close any running euron-agent and retry, "
+                      "or run: pip install -U euron-coding-agent")
+
+
 def cmd_plugin(args) -> None:
     from . import plugins
 
@@ -706,6 +724,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("providers", help="List configured providers").set_defaults(func=cmd_providers)
     sub.add_parser("init", help="Scaffold config.yaml and .env").set_defaults(func=cmd_init)
+    sub.add_parser("update", help="Update euron-coding-agent to the latest version").set_defaults(func=cmd_update)
 
     pl = sub.add_parser("plugin", help="Manage plugins (skills/commands/MCP bundles)")
     pl.add_argument("action", choices=["add", "list", "remove"])
