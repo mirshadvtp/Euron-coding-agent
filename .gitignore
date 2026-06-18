@@ -18,3 +18,8 @@ extension/out/
 
 # Misc
 .DS_Store
+
+# Test artifacts
+backend/.coverage
+backend/.pytest_cache/
+.pytest_cache/
