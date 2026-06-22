@@ -11,10 +11,12 @@ Two client types:
   * OpenAICompatClient  — any OpenAI Chat Completions API (Euri, OpenAI,
                           OpenRouter, Ollama, vLLM, LM Studio, …).
   * AnthropicClient     — native Anthropic Messages API.
+  * BedrockClient       — native Amazon Bedrock Converse API (streaming).
 """
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -55,6 +57,8 @@ def _make_client(provider: ProviderConfig, agent: Optional[AgentConfig] = None):
     effort = agent.reasoning_effort if agent else None
     if provider.type == "anthropic":
         return AnthropicClient(provider, attempts, backoff, thinking=thinking)
+    if provider.type == "bedrock":
+        return BedrockClient(provider, attempts, backoff)
     return OpenAICompatClient(provider, attempts, backoff, reasoning_effort=effort)
 
 
@@ -104,6 +108,10 @@ def _retryable(e: Exception) -> bool:
     code = getattr(e, "status_code", None)
     if code is None:
         code = getattr(getattr(e, "response", None), "status_code", None)
+    if code is None:
+        resp = getattr(e, "response", None)
+        if isinstance(resp, dict):
+            code = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
     if code in (400, 401, 403, 404, 422):
         return False
     return True
@@ -416,3 +424,303 @@ class AnthropicClient(_RetryMixin):
                 for _ in s.text_stream:
                     pass
             return self._collect(s.get_final_message())
+
+
+# --------------------------------------------------------------------------- #
+# Amazon Bedrock (Converse API)
+# --------------------------------------------------------------------------- #
+def bedrock_bearer_token(provider: ProviderConfig) -> Optional[str]:
+    """Bedrock API key (ABSK…) from settings or AWS_BEARER_TOKEN_BEDROCK."""
+    raw = provider.api_key or os.getenv("AWS_BEARER_TOKEN_BEDROCK") or ""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:].strip()
+    # IAM access keys are not bearer tokens.
+    if raw.startswith("AKIA") or ":" in raw:
+        return None
+    return raw
+
+
+def bedrock_iam_credentials(provider: ProviderConfig) -> Optional[tuple[str, str, Optional[str]]]:
+    """(access_key_id, secret_access_key, session_token) when using IAM."""
+    access = (provider.api_key or os.getenv("AWS_ACCESS_KEY_ID") or "").strip()
+    secret = (provider.api_secret or os.getenv("AWS_SECRET_ACCESS_KEY") or "").strip()
+    token = os.getenv("AWS_SESSION_TOKEN")
+    if access.lower().startswith("bearer "):
+        access = access[7:].strip()
+    if access.startswith("ABSK"):
+        return None
+    if ":" in access and not secret:
+        access, secret = access.split(":", 1)
+    if access and secret:
+        return access, secret, token
+    return None
+
+
+def bedrock_credentials_ready(provider: ProviderConfig) -> bool:
+    if bedrock_bearer_token(provider):
+        return True
+    if bedrock_iam_credentials(provider):
+        return True
+    if os.getenv("AWS_BEARER_TOKEN_BEDROCK"):
+        return True
+    try:
+        import boto3
+        return boto3.Session().get_credentials() is not None
+    except Exception:
+        return False
+
+
+class BedrockClient(_RetryMixin):
+    """Native Amazon Bedrock client using the Converse / ConverseStream APIs."""
+
+    def __init__(self, provider: ProviderConfig, attempts: int = 3, backoff: float = 1.5):
+        try:
+            import boto3
+        except ImportError as e:
+            raise LLMError(
+                "boto3 is required for the bedrock provider. "
+                "Install with: pip install 'euron-coding-agent[bedrock]'"
+            ) from e
+
+        self.provider = provider
+        self.retry_attempts = attempts
+        self.retry_backoff = backoff
+        region = (
+            provider.region
+            or os.getenv("AWS_REGION")
+            or os.getenv("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        )
+        client_kwargs: dict[str, Any] = {
+            "service_name": "bedrock-runtime",
+            "region_name": region,
+        }
+        if provider.base_url:
+            client_kwargs["endpoint_url"] = provider.base_url
+
+        bearer = bedrock_bearer_token(provider)
+        iam = bedrock_iam_credentials(provider)
+        if bearer:
+            # boto3 reads AWS_BEARER_TOKEN_BEDROCK (no per-client param yet).
+            os.environ["AWS_BEARER_TOKEN_BEDROCK"] = bearer
+            self.client = boto3.client(**client_kwargs)
+        elif iam:
+            access, secret, token = iam
+            session_kwargs: dict[str, Any] = {
+                "aws_access_key_id": access,
+                "aws_secret_access_key": secret,
+                "region_name": region,
+            }
+            if token:
+                session_kwargs["aws_session_token"] = token
+            self.client = boto3.Session(**session_kwargs).client(
+                "bedrock-runtime",
+                endpoint_url=provider.base_url or None,
+            )
+        else:
+            self.client = boto3.client(**client_kwargs)
+
+    @staticmethod
+    def _to_bedrock_tools(tools):
+        out = []
+        for t in tools or []:
+            fn = t.get("function", {})
+            out.append({
+                "toolSpec": {
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                    "inputSchema": {"json": fn.get("parameters", {"type": "object"})},
+                }
+            })
+        return out
+
+    @staticmethod
+    def _image_block(url: str) -> Optional[dict]:
+        if not url.startswith("data:") or "," not in url:
+            return None
+        header, data = url.split(",", 1)
+        media = header.split(";")[0].split(":")[-1]
+        fmt = media.split("/")[-1].lower()
+        if fmt == "jpg":
+            fmt = "jpeg"
+        if fmt not in ("png", "jpeg", "gif", "webp"):
+            return None
+        import base64
+
+        try:
+            raw = base64.b64decode(data, validate=False)
+        except Exception:
+            return None
+        return {
+            "image": {
+                "format": fmt,
+                "source": {"bytes": raw},
+            }
+        }
+
+    @staticmethod
+    def _to_bedrock_messages(messages):
+        system_parts: list[str] = []
+        out: list[dict] = []
+
+        def push(role: str, block: dict):
+            if out and out[-1]["role"] == role:
+                out[-1]["content"].append(block)
+            else:
+                out.append({"role": role, "content": [block]})
+
+        for m in messages:
+            role = m["role"]
+            if role == "system":
+                system_parts.append(m.get("content") or "")
+            elif role == "user":
+                content = m.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if block.get("type") == "text":
+                            push("user", {"text": block.get("text", "")})
+                        elif block.get("type") == "image_url":
+                            img = BedrockClient._image_block(
+                                block.get("image_url", {}).get("url", "")
+                            )
+                            if img:
+                                push("user", img)
+                else:
+                    push("user", {"text": content or ""})
+            elif role == "assistant":
+                if m.get("content"):
+                    push("assistant", {"text": m["content"]})
+                for tc in m.get("tool_calls") or []:
+                    fn = tc["function"]
+                    push("assistant", {
+                        "toolUse": {
+                            "toolUseId": tc["id"],
+                            "name": fn["name"],
+                            "input": _safe_json_loads(fn.get("arguments") or "{}"),
+                        }
+                    })
+            elif role == "tool":
+                push("user", {
+                    "toolResult": {
+                        "toolUseId": m.get("tool_call_id"),
+                        "content": [{"text": m.get("content") or ""}],
+                    }
+                })
+        system = "\n".join(p for p in system_parts if p)
+        return system, out
+
+    def _build_request(self, messages, tools):
+        system, conv = self._to_bedrock_messages(messages)
+        req: dict[str, Any] = {
+            "modelId": self.provider.model,
+            "messages": conv,
+            "inferenceConfig": {
+                "maxTokens": self.provider.max_tokens,
+                "temperature": self.provider.temperature,
+            },
+        }
+        if system:
+            req["system"] = [{"text": system}]
+        if tools:
+            req["toolConfig"] = {"tools": self._to_bedrock_tools(tools)}
+        return req
+
+    def chat(self, messages, tools=None, stream_cb=None, stream=True) -> LLMResponse:
+        req = self._build_request(messages, tools)
+
+        def run(cb):
+            return self._chat_stream(req, cb) if stream else self._chat_once(req)
+
+        resp = self._with_retry(run, stream_cb)
+        if not resp.prompt_tokens:
+            resp.prompt_tokens = sum(
+                _estimate(str(m.get("content") or "")) for m in messages
+            )
+        if not resp.completion_tokens:
+            resp.completion_tokens = _estimate(resp.content)
+        return resp
+
+    @staticmethod
+    def _collect_blocks(blocks) -> LLMResponse:
+        content, calls = "", []
+        for block in blocks or []:
+            if "text" in block:
+                content += block["text"]
+            elif "toolUse" in block:
+                tu = block["toolUse"]
+                calls.append(ToolCall(
+                    tu.get("toolUseId") or "",
+                    tu.get("name") or "",
+                    tu.get("input") or {},
+                ))
+        return LLMResponse(content=content, tool_calls=calls)
+
+    def _chat_once(self, req: dict) -> LLMResponse:
+        resp = self.client.converse(**req)
+        output = resp.get("output", {}).get("message", {})
+        usage = resp.get("usage") or {}
+        collected = self._collect_blocks(output.get("content"))
+        collected.prompt_tokens = int(usage.get("inputTokens") or 0)
+        collected.completion_tokens = int(usage.get("outputTokens") or 0)
+        return collected
+
+    def _chat_stream(self, req: dict, stream_cb: StreamCallback) -> LLMResponse:
+        content_parts: list[str] = []
+        partial: dict[int, dict] = {}
+        blocks: dict[int, dict] = {}
+        usage: dict[str, int] = {}
+
+        for event in self.client.converse_stream(**req).get("stream", []):
+            if "contentBlockStart" in event:
+                start = event["contentBlockStart"]
+                idx = start.get("contentBlockIndex", 0)
+                tool = (start.get("start") or {}).get("toolUse")
+                if tool:
+                    partial[idx] = {
+                        "id": tool.get("toolUseId"),
+                        "name": tool.get("name") or "",
+                        "args": "",
+                    }
+            elif "contentBlockDelta" in event:
+                delta = event["contentBlockDelta"]["delta"]
+                idx = event["contentBlockDelta"].get("contentBlockIndex", 0)
+                if "text" in delta:
+                    text = delta["text"]
+                    content_parts.append(text)
+                    blocks.setdefault(idx, {"text": ""})
+                    blocks[idx]["text"] += text
+                    if stream_cb:
+                        stream_cb(text)
+                tool_delta = delta.get("toolUse")
+                if tool_delta:
+                    slot = partial.setdefault(idx, {"id": None, "name": "", "args": ""})
+                    if tool_delta.get("input"):
+                        slot["args"] += tool_delta["input"]
+            elif "contentBlockStop" in event:
+                idx = event["contentBlockStop"].get("contentBlockIndex", 0)
+                slot = partial.get(idx)
+                if slot and slot.get("name"):
+                    blocks[idx] = {
+                        "toolUse": {
+                            "toolUseId": slot["id"] or f"call_{idx}",
+                            "name": slot["name"],
+                            "input": _safe_json_loads(slot["args"]),
+                        }
+                    }
+            elif "metadata" in event:
+                u = (event["metadata"] or {}).get("usage") or {}
+                usage = {
+                    "inputTokens": int(u.get("inputTokens") or 0),
+                    "outputTokens": int(u.get("outputTokens") or 0),
+                }
+
+        ordered_blocks = [blocks[i] for i in sorted(blocks)]
+        resp = self._collect_blocks(ordered_blocks)
+        if not resp.content and content_parts:
+            resp.content = "".join(content_parts)
+        resp.prompt_tokens = usage.get("inputTokens", 0)
+        resp.completion_tokens = usage.get("outputTokens", 0)
+        return resp

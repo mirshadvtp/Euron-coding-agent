@@ -581,6 +581,104 @@ def test_anthropic_image_conversion():
     assert any(b["type"] == "image" for b in blocks)
 
 
+def test_bedrock_message_conversion():
+    from euron_agent.llm import BedrockClient
+    msgs = [
+        {"role": "system", "content": "be helpful"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "t1", "function": {"name": "read_file", "arguments": '{"path":"a.py"}'},
+        }]},
+        {"role": "tool", "tool_call_id": "t1", "content": "print('hi')"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "look"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]},
+    ]
+    system, conv = BedrockClient._to_bedrock_messages(msgs)
+    assert system == "be helpful"
+    assert conv[0]["content"][0]["text"] == "hello"
+    assert conv[1]["content"][0]["toolUse"]["name"] == "read_file"
+    assert conv[2]["content"][0]["toolResult"]["toolUseId"] == "t1"
+    assert any("image" in b for block in conv for b in block["content"])
+
+
+def test_bedrock_stream_collect():
+    from euron_agent.llm import BedrockClient
+
+    blocks = [
+        {"text": "hello "},
+        {"toolUse": {"toolUseId": "c1", "name": "glob", "input": {"pattern": "*.py"}}},
+    ]
+    resp = BedrockClient._collect_blocks(blocks)
+    assert resp.content == "hello "
+    assert resp.tool_calls[0].name == "glob"
+    assert resp.tool_calls[0].arguments["pattern"] == "*.py"
+
+
+def test_bedrock_bearer_token():
+    from euron_agent.config import ProviderConfig
+    from euron_agent.llm import bedrock_bearer_token, bedrock_credentials_ready, bedrock_iam_credentials
+
+    p = ProviderConfig(
+        name="bedrock", type="bedrock",
+        api_key="Bearer ABSKtest-key-value",
+        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    )
+    assert bedrock_bearer_token(p) == "ABSKtest-key-value"
+    assert bedrock_credentials_ready(p)
+    assert bedrock_iam_credentials(p) is None
+
+    iam = ProviderConfig(
+        name="bedrock", type="bedrock",
+        api_key="AKIAIOSFODNN7EXAMPLE",
+        api_secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        model="m",
+    )
+    assert bedrock_bearer_token(iam) is None
+    assert bedrock_iam_credentials(iam)[0].startswith("AKIA")
+
+
+def test_bedrock_stream_events():
+    from euron_agent.config import ProviderConfig
+    from euron_agent.llm import BedrockClient
+
+    class FakeStream:
+        def converse_stream(self, **_kwargs):
+            return {"stream": [
+                {"contentBlockStart": {
+                    "contentBlockIndex": 0,
+                    "start": {},
+                }},
+                {"contentBlockDelta": {
+                    "contentBlockIndex": 0,
+                    "delta": {"text": "Hi"},
+                }},
+                {"contentBlockStop": {"contentBlockIndex": 0}},
+                {"contentBlockStart": {
+                    "contentBlockIndex": 1,
+                    "start": {"toolUse": {"toolUseId": "t1", "name": "read_file"}},
+                }},
+                {"contentBlockDelta": {
+                    "contentBlockIndex": 1,
+                    "delta": {"toolUse": {"input": '{"path":"x"}'}},
+                }},
+                {"contentBlockStop": {"contentBlockIndex": 1}},
+                {"metadata": {"usage": {"inputTokens": 10, "outputTokens": 5}}},
+            ]}
+
+    prov = ProviderConfig(name="bedrock", type="bedrock", model="anthropic.claude-3-5-sonnet-20241022-v2:0")
+    client = BedrockClient(prov)
+    client.client = FakeStream()
+    chunks = []
+    resp = client._chat_stream({"modelId": prov.model, "messages": []}, lambda t: chunks.append(t))
+    assert resp.content == "Hi"
+    assert chunks == ["Hi"]
+    assert resp.tool_calls[0].name == "read_file"
+    assert resp.prompt_tokens == 10
+    assert resp.completion_tokens == 5
+
+
 # --------------------------------------------------------------------------- #
 # 0.5.0: skills / fallback / worktrees / usage
 # --------------------------------------------------------------------------- #
@@ -681,10 +779,16 @@ def test_plugins(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_many_providers():
     cfg = load_config()
-    expected = {"gemini", "groq", "cerebras", "deepseek", "together", "mistral", "xai", "vercel", "lmstudio"}
+    expected = {
+        "gemini", "groq", "cerebras", "deepseek", "together", "mistral",
+        "xai", "vercel", "lmstudio", "bedrock",
+    }
     assert expected <= set(cfg.all_providers)
     g = load_config(provider="gemini")
     assert "generativelanguage" in (g.provider.base_url or "")
+    b = load_config(provider="bedrock")
+    assert b.provider.type == "bedrock"
+    assert b.provider.region == "us-east-1"
 
 
 def test_team_id():

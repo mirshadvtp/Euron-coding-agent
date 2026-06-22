@@ -19,6 +19,7 @@ const PROVIDERS: ProviderMeta[] = [
   { id: 'openai', label: 'OpenAI', detail: 'GPT models', needsKey: true },
   { id: 'openrouter', label: 'OpenRouter', detail: 'Hundreds of models', needsKey: true },
   { id: 'anthropic', label: 'Anthropic (Claude)', detail: 'Claude models', needsKey: true },
+  { id: 'bedrock', label: 'Amazon Bedrock', detail: 'Claude, Llama, Titan via AWS', needsKey: false },
   { id: 'ollama', label: 'Ollama', detail: 'Local, no API key', needsKey: false },
   {
     id: 'custom',

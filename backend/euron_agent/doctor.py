@@ -41,16 +41,47 @@ def run_checks(config: Config | None = None, workspace: str = ".") -> list[Check
     if config is not None:
         p = config.provider
         checks.append(Check("Active provider", "pass", f"{p.name} ({p.model})"))
-        needs_key = bool(p.api_key_env)  # local providers (ollama/lmstudio) need none
-        if not needs_key:
-            checks.append(Check("API key", "pass", "not required (local provider)"))
-        elif p.api_key:
-            checks.append(Check("API key", "pass", f"set via {p.api_key_env}"))
+        if p.type == "bedrock":
+            from .llm import bedrock_credentials_ready, bedrock_bearer_token, bedrock_iam_credentials
+            if bedrock_bearer_token(p):
+                checks.append(Check("Bedrock API key", "pass", "set (ABSK bearer token)"))
+            elif bedrock_iam_credentials(p):
+                checks.append(Check("AWS credentials", "pass", "IAM access key + secret"))
+            else:
+                try:
+                    import boto3
+                    creds = boto3.Session().get_credentials()
+                    if creds:
+                        checks.append(Check("AWS credentials", "pass", "environment/profile/IAM role"))
+                    else:
+                        checks.append(Check(
+                            "AWS credentials", "warn", "not found",
+                            "Run /key with your Bedrock API key (ABSK…) or IAM access:secret, "
+                            "or set AWS_BEARER_TOKEN_BEDROCK / AWS_ACCESS_KEY_ID+SECRET.",
+                        ))
+                except ImportError:
+                    checks.append(Check(
+                        "boto3", "fail", "not installed",
+                        "pip install 'euron-coding-agent[bedrock]'",
+                    ))
+            region = (
+                p.region
+                or os.getenv("AWS_REGION")
+                or os.getenv("AWS_DEFAULT_REGION")
+                or "us-east-1"
+            )
+            checks.append(Check("AWS region", "pass", region))
         else:
-            checks.append(Check("API key", "warn", f"{p.api_key_env} not set",
-                                f"export {p.api_key_env}=… or run `/key` in chat."))
-        if p.base_url:
-            checks.append(Check("Base URL", "pass", p.base_url))
+            needs_key = bool(p.api_key_env)  # local providers (ollama/lmstudio) need none
+            if not needs_key:
+                checks.append(Check("API key", "pass", "not required (local provider)"))
+            elif p.api_key:
+                checks.append(Check("API key", "pass", f"set via {p.api_key_env}"))
+            else:
+                checks.append(Check("API key", "warn", f"{p.api_key_env} not set",
+                                    f"export {p.api_key_env}=… or run `/key` in chat."))
+            if p.base_url:
+                checks.append(Check("Base URL", "pass", p.base_url))
 
     # Optional external tools
     for exe, why in [

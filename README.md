@@ -83,9 +83,10 @@ Not locked to one provider. Built-in profiles (just pick one and add a key):
 | Groq / Cerebras | fast inference (Llama, etc.) | `GROQ_API_KEY` / `CEREBRAS_API_KEY` |
 | DeepSeek / Together / Mistral / xAI | their hosted models | `*_API_KEY` |
 | Vercel AI Gateway | models via the gateway | `AI_GATEWAY_API_KEY` |
+| Amazon Bedrock | Claude, Llama, Titan, etc. via AWS | AWS credentials + `AWS_REGION` |
 | Euron / Euri | Euron-hosted models | `EURI_API_KEY` |
 | Ollama / LM Studio | local models, no key | - |
-| Custom | any OpenAI-compatible / self-hosted (incl. AWS Bedrock, Azure, GCP Vertex via a proxy) | configurable |
+| Custom | any OpenAI-compatible / self-hosted (incl. Azure, GCP Vertex via a proxy) | configurable |
 
 Capabilities (vision, tools, thinking) degrade gracefully when a model lacks them.
 

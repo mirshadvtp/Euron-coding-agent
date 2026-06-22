@@ -25,13 +25,15 @@ load_dotenv()  # pull .env into os.environ if present
 @dataclass
 class ProviderConfig:
     name: str
-    type: str = "openai"  # "openai" (OpenAI-compatible) or "anthropic"
+    type: str = "openai"  # "openai" | "anthropic" | "bedrock"
     base_url: Optional[str] = None
     api_key_env: Optional[str] = None
     api_key: Optional[str] = None  # resolved from api_key_env at load time
+    api_secret: Optional[str] = None  # AWS secret key (bedrock IAM) or from settings
     model: str = "gpt-4o-mini"
     temperature: float = 0.2
     max_tokens: int = 4096
+    region: Optional[str] = None  # AWS region for bedrock
     extra_headers: dict = field(default_factory=dict)
 
 
@@ -198,8 +200,15 @@ BUILTIN_PROVIDERS: dict[str, dict] = {
         "api_key_env": None,
         "model": "local-model",
     },
+    "bedrock": {
+        "type": "bedrock",
+        "base_url": None,
+        "api_key_env": None,
+        "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "region": "us-east-1",
+    },
     # Generic OpenAI-compatible endpoint; base_url/model supplied at runtime.
-    # Covers AWS Bedrock / Azure / GCP Vertex via an OpenAI-compatible proxy.
+    # Covers Azure / GCP Vertex via an OpenAI-compatible proxy.
     "custom": {
         "type": "openai",
         "base_url": "http://localhost:8001/v1",
@@ -243,6 +252,7 @@ def _provider_from_dict(name: str, d: dict) -> ProviderConfig:
         model=d.get("model", "gpt-4o-mini"),
         temperature=float(d.get("temperature", 0.2)),
         max_tokens=int(d.get("max_tokens", 4096)),
+        region=d.get("region"),
         extra_headers=d.get("extra_headers", {}) or {},
     )
 
@@ -253,12 +263,13 @@ def load_config(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
     base_url: Optional[str] = None,
 ) -> Config:
     """Load configuration, applying optional overrides.
 
-    `api_key` / `base_url` let a caller (e.g. the VS Code extension) inject a
-    secret and endpoint at runtime so nothing has to live in a file.
+    `api_key` / `api_secret` / `base_url` let a caller (e.g. the VS Code extension)
+    inject secrets and endpoints at runtime so nothing has to live in a file.
     """
     raw: dict[str, Any] = {}
     cfg_file = _find_config_file(config_path)
@@ -282,6 +293,8 @@ def load_config(
         overrides["model"] = model
     if api_key:  # non-empty only
         overrides["api_key"] = api_key
+    if api_secret:
+        overrides["api_secret"] = api_secret
     if base_url:
         overrides["base_url"] = base_url
     if overrides:

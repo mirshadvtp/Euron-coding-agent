@@ -310,6 +310,7 @@ def resolve_config(args):
         provider=provider,
         model=args.model or over.get("model"),
         api_key=over.get("api_key"),
+        api_secret=over.get("api_secret"),
         base_url=over.get("base_url"),
     )
     if getattr(args, "yes", False):
@@ -320,6 +321,9 @@ def resolve_config(args):
 
 def _key_missing(cfg) -> bool:
     p = cfg.provider
+    if p.type == "bedrock":
+        from .llm import bedrock_credentials_ready
+        return not bedrock_credentials_ready(p)
     if p.api_key:
         return False
     if not p.api_key_env:  # e.g. ollama / custom — no key required
@@ -635,10 +639,17 @@ def _print_providers() -> None:
     table.add_column("key", justify="center")
     for name, p in cfg.all_providers.items():
         over = (s.get("providers") or {}).get(name, {})
-        has_key = bool(
-            over.get("api_key") or (p.api_key_env and os.getenv(p.api_key_env))
-        )
-        needs = bool(p.api_key_env)
+        if p.type == "bedrock":
+            from .llm import bedrock_credentials_ready
+            from dataclasses import replace
+            probe = replace(p, api_key=over.get("api_key"), api_secret=over.get("api_secret"))
+            has_key = bedrock_credentials_ready(probe)
+            needs = True
+        else:
+            has_key = bool(
+                over.get("api_key") or (p.api_key_env and os.getenv(p.api_key_env))
+            )
+            needs = bool(p.api_key_env)
         key_mark = "✓" if has_key else ("—" if not needs else "[red]✗[/red]")
         table.add_row(name, p.type, over.get("model") or p.model, key_mark)
     console.print(table)
@@ -757,16 +768,42 @@ async def _handle_command(line: str, session: AgentSession, args, io: TerminalIO
                 f"({session.config.provider.model})"
             )
             if _key_missing(session.config):
-                console.print("[yellow]no API key for this provider — use /key[/yellow]")
+                if session.config.provider.type == "bedrock":
+                    console.print(
+                        "[yellow]no AWS credentials — use /key with your Bedrock API key "
+                        "(ABSK…) or IAM access:secret[/yellow]"
+                    )
+                else:
+                    console.print("[yellow]no API key for this provider — use /key[/yellow]")
     elif cmd == "/key":
         provider = session.config.provider.name
-        value = rest or await asyncio.to_thread(
-            getpass.getpass, f"API key for {provider} (hidden): "
-        )
-        if value.strip():
+        ptype = session.config.provider.type
+        if ptype == "bedrock":
+            value = rest or await asyncio.to_thread(
+                getpass.getpass,
+                "Bedrock API key (ABSK…) or IAM access:secret (hidden): ",
+            )
+            if not value.strip():
+                return
+            value = value.strip()
+            if value.lower().startswith("bearer "):
+                value = value[7:].strip()
+            if ":" in value and not value.startswith("ABSK"):
+                access, secret = value.split(":", 1)
+                user_settings.set_provider_field(provider, "api_key", access.strip())
+                user_settings.set_provider_field(provider, "api_secret", secret.strip())
+            else:
+                user_settings.set_provider_field(provider, "api_key", value)
+                user_settings.set_provider_field(provider, "api_secret", None)
+        else:
+            value = rest or await asyncio.to_thread(
+                getpass.getpass, f"API key for {provider} (hidden): "
+            )
+            if not value.strip():
+                return
             user_settings.set_provider_field(provider, "api_key", value.strip())
-            _reload(session, args)
-            console.print(f"[green]key saved for {provider}[/green]")
+        _reload(session, args)
+        console.print(f"[green]credentials saved for {provider}[/green]")
     elif cmd == "/model":
         provider = session.config.provider.name
         value = rest or await asyncio.to_thread(Prompt.ask, "model")

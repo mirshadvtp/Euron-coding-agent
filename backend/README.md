@@ -6,8 +6,8 @@ edits code, runs commands, searches the web, reviews diffs, coordinates teams of
 sub-agents, and runs on cron schedules - with your approval at every step.
 
 Provider-agnostic: works with Anthropic, OpenAI, Google Gemini, OpenRouter, Groq,
-Cerebras, DeepSeek, Together, Mistral, xAI, Vercel AI Gateway, Euron/Euri,
-Ollama, LM Studio, or any OpenAI-compatible / self-hosted endpoint.
+Cerebras, DeepSeek, Together, Mistral, xAI, Vercel AI Gateway, Amazon Bedrock,
+Euron/Euri, Ollama, LM Studio, or any OpenAI-compatible / self-hosted endpoint.
 
 ## Install
 
@@ -15,6 +15,7 @@ Ollama, LM Studio, or any OpenAI-compatible / self-hosted endpoint.
     euron-agent update                            # update to the latest anytime
     # optional extras:
     pip install "euron-coding-agent[anthropic]"   # native Anthropic client
+    pip install "euron-coding-agent[bedrock]"     # native Amazon Bedrock (Converse + streaming)
     pip install "euron-coding-agent[mcp]"         # Model Context Protocol servers
 
 Tip: install into a virtual environment for isolation. The client auto-adapts to

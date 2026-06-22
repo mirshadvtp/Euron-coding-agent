@@ -31,6 +31,7 @@ Issues = "https://github.com/euron-tech/Euron-coding-agent/issues"
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.34"]
+bedrock = ["boto3>=1.34"]
 mcp = ["mcp>=1.0"]
 dev = ["pytest>=8.0"]
 

@@ -64,6 +64,15 @@ providers:
     temperature: 0.2
     max_tokens: 4096
 
+  # ---- Amazon Bedrock (native Converse API, streaming) ----------------------
+  bedrock:
+    type: bedrock
+    api_key_env: null         # uses AWS credential chain (env/profile/IAM)
+    model: anthropic.claude-3-5-sonnet-20241022-v2:0
+    region: us-east-1
+    temperature: 0.2
+    max_tokens: 4096
+
 # Agent behaviour -------------------------------------------------------------
 agent:
   max_steps: 30              # safety cap on tool-use iterations per task
